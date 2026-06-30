@@ -1,0 +1,29 @@
+{
+  "app": "Soundbender TagDeck",
+  "manifest_version": 1,
+  "channel": "beta",
+  "latest_version": "1.4.0-beta.1",
+  "released_at": "2026-06-29T00:00:00Z",
+  "minimum_supported_version": "1.4.0-beta.1",
+  "download_url": "https://soundbender.live/tagdeck/download",
+  "release_notes_url": "https://soundbender.live/tagdeck/releases/1.4.0-beta.1",
+  "mandatory": false,
+  "sha256": "1854E7B17103847DF400EFB3240ACB044F9DA9F1D16F70003654961A58406D8F",
+  "size": 5562489,
+  "notes": {
+    "en": [
+      "First public/tester beta of Soundbender TagDeck.",
+      "Installer and source code package prepared for inspection and forks.",
+      "Local-first library, player, metadata editing and creative organization.",
+      "Explorer/Curator mode, workflow presets, playlists and session mode.",
+      "Export/import improvements, full library backup/restore foundation and manual update checker."
+    ],
+    "es": [
+      "Primera beta publica/tester de Soundbender TagDeck.",
+      "Instalador y paquete de codigo fuente preparados para inspeccion y forks.",
+      "Biblioteca local, reproductor, edicion de metadatos y organizacion creativa.",
+      "Modo Explorador/Curador, workflow presets, listas y modo sesion.",
+      "Mejoras de exportacion/importacion, base de backup/restauracion completa y comprobador manual de actualizaciones."
+    ]
+  }
+}

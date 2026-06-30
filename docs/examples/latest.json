@@ -1,0 +1,25 @@
+{
+  "app": "Soundbender TagDeck",
+  "manifest_version": 1,
+  "channel": "beta",
+  "latest_version": "1.4.0-beta.1",
+  "released_at": "2026-06-26T12:00:00Z",
+  "minimum_supported_version": "1.4.0-beta.1",
+  "download_url": "https://soundbender.live/tagdeck/download",
+  "release_notes_url": "https://soundbender.live/tagdeck/releases/1.4.0-beta.1",
+  "mandatory": false,
+  "sha256": null,
+  "size": null,
+  "notes": {
+    "en": [
+      "Manual update checks from Settings.",
+      "Improved library backup and restore.",
+      "Workflow and library reliability improvements."
+    ],
+    "es": [
+      "Comprobacion manual de actualizaciones desde Ajustes.",
+      "Mejoras en backup y restauracion de biblioteca.",
+      "Mejoras de fiabilidad en workflow y biblioteca."
+    ]
+  }
+}
