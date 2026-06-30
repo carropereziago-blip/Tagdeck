@@ -1,0 +1,35 @@
+[package]
+name = "soundbender-tagdeck"
+version = "1.4.0-beta.1"
+description = "Biblioteca musical local y editor seguro de metadatos"
+authors = ["Soundbender"]
+edition = "2021"
+
+[lib]
+name = "soundbender_tagdeck_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+dunce = "1"
+lofty = "0.24"
+rodio = { version = "0.21.1", features = ["symphonia-all"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-drag = "2.1.1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tracing = "0.1"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

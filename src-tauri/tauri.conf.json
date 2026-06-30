@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Soundbender TagDeck",
+  "version": "1.4.0-beta.1",
+  "identifier": "live.soundbender.tagdeck",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Soundbender TagDeck",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "publisher": "Soundbender",
+    "shortDescription": "Biblioteca musical local para organización, reproducción y curaduría.",
+    "longDescription": "Soundbender TagDeck permite organizar, reproducir, puntuar y curar bibliotecas musicales locales, con herramientas para música generada con IA/Suno y edición segura de metadatos.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Spanish", "English"],
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "startMenuFolder": "Soundbender"
+      },
+      "wix": {
+        "version": "1.4.0",
+        "upgradeCode": "517e6679-b26b-5db8-9ba5-452fb1b68e9b",
+        "language": "es-ES"
+      }
+    }
+  }
+}
