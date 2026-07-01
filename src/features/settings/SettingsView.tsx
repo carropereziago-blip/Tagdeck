@@ -18,11 +18,17 @@ import {
   Volume2,
 } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api } from "../../lib/tauri";
+import {
+  formatShortcut,
+  keyComboFromEvent,
+  shortcutConflictIds,
+} from "../../lib/keyboardShortcuts";
 import type {
   AppDiagnostics,
   LibraryQuery,
+  OrganizationOptions,
   PackType,
   PlaylistSummary,
   UpdateCheckResult,
@@ -36,9 +42,11 @@ import {
   FIELD_VISIBILITY_ZONES,
   LIBRARY_COLUMNS,
   applyFieldVisibilityPreset,
+  defaultKeyboardShortcuts,
   isFieldRequiredInZone,
   isFieldSupportedInZone,
   normalizeFieldVisibility,
+  normalizeLibraryColumnOrder,
   resetSectionOnboarding,
   setFieldVisibility,
   setZoneVisibility,
@@ -50,6 +58,9 @@ import {
   type FieldVisibilityPresetId,
   type FieldVisibilityZone,
   type LibraryColumn,
+  type ShortcutContext,
+  type ShortcutField,
+  type ShortcutRule,
 } from "./settings";
 import { useSettings } from "./SettingsContext";
 import { ImportLibraryDialog } from "./ImportLibraryDialog";
@@ -58,6 +69,111 @@ import { useI18n, type SupportedLanguage } from "../../i18n";
 import { UpdateSettingsPanel } from "./UpdateSettingsPanel";
 
 const LIBRARY_FILTERS_KEY = "tagdeck.library.filters";
+const SHORTCUT_CONTEXTS: ShortcutContext[] = ["global", "library", "explorer", "session"];
+const SHORTCUT_FIELDS: ShortcutField[] = [
+  "rating",
+  "status",
+  "genre",
+  "mood",
+  "internal_tag",
+  "project",
+  "model",
+  "language",
+  "next_action",
+  "action",
+];
+const EMPTY_ORGANIZATION_OPTIONS: OrganizationOptions = {
+  tags: [],
+  projects: [],
+  versions: [],
+  models: [],
+  smartCollections: [],
+};
+const SHORTCUT_STATUS_VALUES = [
+  "review",
+  "idea",
+  "editing",
+  "generating",
+  "selected",
+  "final",
+  "archived",
+] as const;
+const SHORTCUT_ACTION_VALUES = [
+  "play_pause",
+  "next",
+  "previous",
+  "save",
+  "save_and_next",
+  "skip",
+  "clear_selection",
+  "open_in_explorer",
+  "open_in_session",
+  "add_to_playlist",
+  "reset_zoom",
+] as const;
+const SHORTCUT_LANGUAGE_VALUES = [
+  "en",
+  "es",
+  "instrumental",
+  "pt",
+  "fr",
+  "de",
+  "it",
+  "other",
+] as const;
+const SUGGESTED_GENRES = [
+  "House",
+  "Piano House",
+  "Latin House",
+  "Techno",
+  "Detroit Techno",
+  "Chicago House",
+  "Pop",
+  "Rock",
+  "Funk",
+  "Soul",
+  "Gospel House",
+  "Psytrance",
+  "Ambient",
+  "Hip Hop",
+];
+const SUGGESTED_MOODS = [
+  "Danceable",
+  "Energetic",
+  "Happy",
+  "Dark",
+  "Chill",
+  "Emotional",
+  "Epic",
+  "Funny",
+  "Melancholic",
+  "Aggressive",
+  "Hypnotic",
+  "Groovy",
+];
+const SUGGESTED_TAGS = [
+  "Potential",
+  "Strong Idea",
+  "Maybe Later",
+  "Rejects I Like",
+  "Custom Model Seed",
+  "Release Candidate",
+  "Final Version",
+  "Needs Stems",
+  "Needs Mix",
+  "Needs Master",
+  "Needs Arrangement",
+  "Needs Shorter Edit",
+  "Useful Fragment",
+  "Core Seed",
+  "Reference Only",
+  "Vocal Reference",
+  "Groove Reference",
+  "Lyric Reference",
+  "Arrangement Reference",
+  "Production Reference",
+];
+const SUGGESTED_MODELS = ["Suno", "Suno v4", "Suno v4.5", "Udio", "Custom"];
 
 const LIBRARY_FIELD_BY_COLUMN: Partial<Record<LibraryColumn, FieldVisibilityField>> = {
   trackNumber: "trackNumber",
@@ -82,6 +198,7 @@ const LIBRARY_FIELD_BY_COLUMN: Partial<Record<LibraryColumn, FieldVisibilityFiel
   path: "path",
   reviewedAt: "reviewedAt",
   intendedUse: "intendedUse",
+  generationModel: "generationModel",
 };
 
 export function SettingsView({
@@ -96,6 +213,8 @@ export function SettingsView({
   const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
+  const [organizationOptions, setOrganizationOptions] =
+    useState<OrganizationOptions>(EMPTY_ORGANIZATION_OPTIONS);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [lastExportPath, setLastExportPath] = useState<string | null>(null);
@@ -107,6 +226,12 @@ export function SettingsView({
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [fieldSearch, setFieldSearch] = useState("");
   const [fieldCategory, setFieldCategory] = useState<FieldVisibilityCategory | "all">("all");
+  const [capturingShortcutId, setCapturingShortcutId] = useState<string | null>(null);
+  const shortcutImportRef = useRef<HTMLInputElement | null>(null);
+  const shortcutConflicts = useMemo(
+    () => shortcutConflictIds(settings.customKeyboardShortcuts),
+    [settings.customKeyboardShortcuts],
+  );
 
   useEffect(() => {
     void api.getAppDiagnostics().then(setDiagnostics).catch(() => undefined);
@@ -118,6 +243,7 @@ export function SettingsView({
         setSelectedPlaylistId((current) => current ?? items[0]?.id ?? null);
       })
       .catch(() => undefined);
+    void api.getOrganizationOptions().then(setOrganizationOptions).catch(() => undefined);
   }, []);
 
   const selectedPlaylist = useMemo(
@@ -165,9 +291,31 @@ export function SettingsView({
       fieldVisibility: normalized,
       library: {
         ...current.library,
-        visibleColumns: visibleLibraryColumns(normalized),
+        visibleColumns: visibleLibraryColumns(normalized, current.library.columnOrder),
       },
     }));
+  }
+
+  function updateLibraryColumnOrder(columnOrder: LibraryColumn[]) {
+    const normalizedOrder = normalizeLibraryColumnOrder(columnOrder);
+    updateSettings((current) => ({
+      ...current,
+      library: {
+        ...current.library,
+        columnOrder: normalizedOrder,
+        visibleColumns: visibleLibraryColumns(current.fieldVisibility, normalizedOrder),
+      },
+    }));
+  }
+
+  function moveLibraryColumn(column: LibraryColumn, direction: -1 | 1) {
+    const ordered = normalizeLibraryColumnOrder(settings.library.columnOrder);
+    const index = ordered.indexOf(column);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
+    const next = [...ordered];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    updateLibraryColumnOrder(next);
   }
 
   function toggleField(
@@ -186,6 +334,244 @@ export function SettingsView({
 
   function applyPreset(presetId: FieldVisibilityPresetId) {
     saveFieldVisibility(applyFieldVisibilityPreset(presetId));
+  }
+
+  function updateShortcut(id: string, patch: Partial<ShortcutRule>) {
+    updateSettings((current) => ({
+      ...current,
+      customKeyboardShortcuts: current.customKeyboardShortcuts.map((rule) =>
+        rule.id === id ? normalizeShortcutRuleForEditor({ ...rule, ...patch }) : rule,
+      ),
+    }));
+  }
+
+  function changeShortcutField(id: string, field: ShortcutField) {
+    updateShortcut(id, { field, value: "" });
+  }
+
+  function normalizeShortcutRuleForEditor(rule: ShortcutRule): ShortcutRule {
+    if (
+      (rule.field === "rating" || rule.field === "status" || rule.field === "action" || rule.field === "language") &&
+      rule.value &&
+      !isShortcutValueAllowed(rule.field, rule.value)
+    ) {
+      return { ...rule, value: "" };
+    }
+    return rule;
+  }
+
+  function isShortcutValueAllowed(field: ShortcutField, value: string) {
+    if (!value) return true;
+    if (field === "rating") {
+      return value === "clear" || /^(10|[1-9])$/.test(value);
+    }
+    if (field === "status") {
+      return SHORTCUT_STATUS_VALUES.includes(value as typeof SHORTCUT_STATUS_VALUES[number]);
+    }
+    if (field === "action") {
+      return SHORTCUT_ACTION_VALUES.includes(value as typeof SHORTCUT_ACTION_VALUES[number]);
+    }
+    if (field === "language") {
+      return SHORTCUT_LANGUAGE_VALUES.includes(value as typeof SHORTCUT_LANGUAGE_VALUES[number]);
+    }
+    return true;
+  }
+
+  function addShortcut() {
+    const id = `custom-${Date.now()}`;
+    updateSettings((current) => ({
+      ...current,
+      customKeyboardShortcuts: [
+        ...current.customKeyboardShortcuts,
+        {
+          id,
+          enabled: true,
+          context: "explorer",
+          field: "mood",
+          value: "",
+          key: "",
+          ctrl: false,
+          alt: false,
+          shift: false,
+          meta: false,
+        },
+      ],
+    }));
+    setCapturingShortcutId(id);
+  }
+
+  function deleteShortcut(id: string) {
+    updateSettings((current) => ({
+      ...current,
+      customKeyboardShortcuts: current.customKeyboardShortcuts.filter(
+        (rule) => rule.id !== id,
+      ),
+    }));
+  }
+
+  function resetShortcuts() {
+    updateSettings((current) => ({
+      ...current,
+      customKeyboardShortcuts: defaultKeyboardShortcuts(),
+    }));
+  }
+
+  function captureShortcut(event: KeyboardEvent<HTMLButtonElement>, id: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    const combo = keyComboFromEvent(event.nativeEvent);
+    updateShortcut(id, combo);
+    setCapturingShortcutId(null);
+  }
+
+  function exportShortcuts() {
+    const payload = JSON.stringify(
+      {
+        type: "tagdeck_keyboard_shortcuts",
+        version: 1,
+        shortcuts: settings.customKeyboardShortcuts,
+      },
+      null,
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([payload], { type: "application/json" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tagdeck_keyboard_shortcuts.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importShortcuts(file: File | null) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(String(reader.result ?? "{}")) as {
+          type?: string;
+          shortcuts?: ShortcutRule[];
+        };
+        if (payload.type !== "tagdeck_keyboard_shortcuts" || !Array.isArray(payload.shortcuts)) {
+          throw new Error(t("settings.invalidShortcutFile"));
+        }
+        updateSettings((current) => ({
+          ...current,
+          customKeyboardShortcuts: payload.shortcuts ?? [],
+        }));
+        setNotice(t("settings.shortcutsImported"));
+      } catch (importError) {
+        setNotice(String(importError));
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function openShortcutOptions(field: ShortcutField) {
+    if (field === "genre") return SUGGESTED_GENRES;
+    if (field === "mood") return SUGGESTED_MOODS;
+    if (field === "internal_tag") {
+      return uniqueValues([
+        ...organizationOptions.tags.map((tag) => tag.name),
+        ...SUGGESTED_TAGS,
+      ]);
+    }
+    if (field === "project") {
+      return organizationOptions.projects.map((project) => project.name);
+    }
+    if (field === "model") {
+      return uniqueValues([...organizationOptions.models, ...SUGGESTED_MODELS]);
+    }
+    return [];
+  }
+
+  function shortcutValueControl(rule: ShortcutRule) {
+    const valueInvalid =
+      rule.enabled &&
+      (rule.field === "rating" ||
+        rule.field === "status" ||
+        rule.field === "action" ||
+        rule.field === "language") &&
+      !rule.value;
+    const invalidClass = valueInvalid ? " border-red-400/40" : "";
+    if (rule.field === "rating") {
+      return (
+        <select
+          value={rule.value}
+          onChange={(event) => updateShortcut(rule.id, { value: event.target.value })}
+          className={`field min-w-44${invalidClass}`}
+        >
+          <option value="">{t("settings.chooseShortcutValue")}</option>
+          {Array.from({ length: 10 }, (_, index) => String(index + 1)).map((rating) => (
+            <option key={rating} value={rating}>{rating}</option>
+          ))}
+          <option value="clear">{t("settings.clearRating")}</option>
+        </select>
+      );
+    }
+    if (rule.field === "status") {
+      return (
+        <select
+          value={rule.value}
+          onChange={(event) => updateShortcut(rule.id, { value: event.target.value })}
+          className={`field min-w-44${invalidClass}`}
+        >
+          <option value="">{t("settings.chooseShortcutValue")}</option>
+          {SHORTCUT_STATUS_VALUES.map((status) => (
+            <option key={status} value={status}>{t(`status.${status}`)}</option>
+          ))}
+        </select>
+      );
+    }
+    if (rule.field === "action") {
+      return (
+        <select
+          value={rule.value}
+          onChange={(event) => updateShortcut(rule.id, { value: event.target.value })}
+          className={`field min-w-44${invalidClass}`}
+        >
+          <option value="">{t("settings.chooseShortcutValue")}</option>
+          {SHORTCUT_ACTION_VALUES.map((action) => (
+            <option key={action} value={action}>{t(`shortcutAction.${action}`)}</option>
+          ))}
+        </select>
+      );
+    }
+    if (rule.field === "language") {
+      return (
+        <select
+          value={rule.value}
+          onChange={(event) => updateShortcut(rule.id, { value: event.target.value })}
+          className={`field min-w-44${invalidClass}`}
+        >
+          <option value="">{t("settings.chooseShortcutValue")}</option>
+          {SHORTCUT_LANGUAGE_VALUES.map((value) => (
+            <option key={value} value={value}>{t(`shortcutLanguage.${value}`)}</option>
+          ))}
+        </select>
+      );
+    }
+    const datalistId = `shortcut-values-${rule.id}`;
+    const options = openShortcutOptions(rule.field);
+    return (
+      <>
+        <input
+          value={rule.value}
+          list={options.length > 0 ? datalistId : undefined}
+          onChange={(event) => updateShortcut(rule.id, { value: event.target.value })}
+          placeholder={t("settings.shortcutValuePlaceholder")}
+          className="field min-w-44"
+        />
+        {options.length > 0 && (
+          <datalist id={datalistId}>
+            {options.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        )}
+      </>
+    );
   }
 
   function filteredVisibilityFields() {
@@ -510,6 +896,148 @@ export function SettingsView({
           </SettingsGrid>
         </SettingsCard>
 
+        <SettingsCard icon={<SlidersHorizontal size={18} />} title={t("settings.keyboardShortcuts")}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-white/75">
+                {t("settings.customQuickKeys")}
+              </p>
+              <p className="mt-1 text-xs text-white/40">
+                {t("settings.shortcutEditorHelp")}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={addShortcut} className="toolbar-button">
+                {t("settings.addShortcut")}
+              </button>
+              <button type="button" onClick={resetShortcuts} className="toolbar-button">
+                {t("settings.resetShortcutDefaults")}
+              </button>
+              <button type="button" onClick={exportShortcuts} className="toolbar-button">
+                <Download size={14} /> {t("settings.exportShortcuts")}
+              </button>
+              <button
+                type="button"
+                onClick={() => shortcutImportRef.current?.click()}
+                className="toolbar-button"
+              >
+                <FileUp size={14} /> {t("settings.importShortcuts")}
+              </button>
+              <input
+                ref={shortcutImportRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(event) => {
+                  importShortcuts(event.target.files?.[0] ?? null);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </div>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-white/8">
+            <table className="w-full min-w-[900px] text-left text-xs">
+              <thead className="bg-white/[0.035] text-white/45">
+                <tr>
+                  <th className="px-3 py-2">{t("settings.shortcutEnabled")}</th>
+                  <th className="px-3 py-2">{t("settings.shortcutContext")}</th>
+                  <th className="px-3 py-2">{t("settings.shortcutField")}</th>
+                  <th className="px-3 py-2">{t("settings.shortcutValue")}</th>
+                  <th className="px-3 py-2">{t("settings.shortcutKey")}</th>
+                  <th className="px-3 py-2">{t("settings.shortcutConflict")}</th>
+                  <th className="px-3 py-2">{t("settings.shortcutDelete")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settings.customKeyboardShortcuts.map((rule) => (
+                  <tr key={rule.id} className="border-t border-white/8">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={(event) =>
+                          updateShortcut(rule.id, { enabled: event.target.checked })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        value={rule.context}
+                        onChange={(event) =>
+                          updateShortcut(rule.id, {
+                            context: event.target.value as ShortcutContext,
+                          })
+                        }
+                        className="field"
+                      >
+                        {SHORTCUT_CONTEXTS.map((context) => (
+                          <option key={context} value={context}>
+                            {t(`shortcutContext.${context}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        value={rule.field}
+                        onChange={(event) =>
+                          changeShortcutField(rule.id, event.target.value as ShortcutField)
+                        }
+                        className="field"
+                      >
+                        {SHORTCUT_FIELDS.map((field) => (
+                          <option key={field} value={field}>
+                            {t(`shortcutField.${field}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      {shortcutValueControl(rule)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        data-ignore-shortcuts="true"
+                        onClick={() => setCapturingShortcutId(rule.id)}
+                        onKeyDown={(event) => captureShortcut(event, rule.id)}
+                        className="min-w-36 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-left text-white/70"
+                      >
+                        {capturingShortcutId === rule.id
+                          ? t("settings.pressKeyCombination")
+                          : formatShortcut(rule) || t("settings.clickToCapture")}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2">
+                      {shortcutConflicts.has(rule.id) ? (
+                        <span className="rounded bg-red-400/10 px-2 py-1 text-red-200">
+                          {t("settings.shortcutConflict")}
+                        </span>
+                      ) : (
+                        <span className="text-white/25">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => deleteShortcut(rule.id)}
+                        className="text-red-200/70 hover:text-red-100"
+                      >
+                        {t("settings.shortcutDelete")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {shortcutConflicts.size > 0 && (
+            <p className="mt-3 rounded-md border border-red-400/20 bg-red-400/8 px-3 py-2 text-xs text-red-100">
+              {t("settings.shortcutConflictHelp")}
+            </p>
+          )}
+        </SettingsCard>
+
         <SettingsCard icon={<Sparkles size={18} />} title={t("settings.updates")}>
           <UpdateSettingsPanel
             currentVersion={diagnostics?.appVersion ?? t("common.reading")}
@@ -562,11 +1090,10 @@ export function SettingsView({
                 })
               }
             >
-              <option value="500">500</option>
               <option value="1000">1000</option>
-              <option value="2000">2000</option>
-              <option value="3000">3000</option>
               <option value="5000">5000</option>
+              <option value="10000">10000</option>
+              <option value="20000">20000</option>
             </SelectSetting>
             <ToggleSetting
               label={t("settings.rememberLastFilter")}
@@ -579,40 +1106,86 @@ export function SettingsView({
               onChange={(value) => section("library", { rememberScanFolder: value })}
             />
           </SettingsGrid>
-          <p className="mt-3 text-xs text-white/35">
-            {t("settings.highVisibleLimitWarning")}
+          <p
+            className={`mt-3 text-xs ${
+              settings.library.visibleLimit >= 10000
+                ? "text-amber-200/70"
+                : "text-white/35"
+            }`}
+          >
+            {settings.library.visibleLimit >= 10000
+              ? t("settings.veryHighVisibleLimitWarning")
+              : t("settings.highVisibleLimitWarning")}
           </p>
           <div className="mt-4">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium text-white/55">
                 {t("settings.visibleColumns")}
               </p>
-              <button
-                type="button"
-                className="text-xs text-[#d9ff43]/70"
-                onClick={() =>
-                  section("library", { visibleColumns: [...DEFAULT_LIBRARY_COLUMNS] })
-                }
-              >
-                {t("common.restoreDefaults")}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="text-xs text-[#d9ff43]/70"
+                  onClick={() =>
+                    section("library", { visibleColumns: [...DEFAULT_LIBRARY_COLUMNS] })
+                  }
+                >
+                  {t("common.restoreDefaults")}
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-[#d9ff43]/70"
+                  onClick={() => updateLibraryColumnOrder([...LIBRARY_COLUMNS])}
+                >
+                  {t("settings.resetColumnOrder")}
+                </button>
+              </div>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {LIBRARY_COLUMNS.map((column) => (
-                <label key={column} className="setting-chip">
-                  <input
-                    type="checkbox"
-                    checked={
-                      column === "title" ||
-                      settings.library.visibleColumns.includes(column)
-                    }
-                    disabled={column === "title"}
-                    onChange={(event) =>
-                      toggleLibraryColumn(column, event.target.checked)
-                    }
-                  />
-                  {t(`field.${LIBRARY_FIELD_BY_COLUMN[column] ?? column}`)}
-                </label>
+            <div className="mt-2 grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">
+              {normalizeLibraryColumnOrder(settings.library.columnOrder).map((column, index, ordered) => (
+                <div
+                  key={column}
+                  className="flex items-center justify-between gap-2 rounded-md border border-white/8 bg-white/[0.025] px-2.5 py-2"
+                >
+                  <label className="flex min-w-0 items-center gap-2 text-xs text-white/60">
+                    <input
+                      type="checkbox"
+                      checked={
+                        column === "title" ||
+                        settings.library.visibleColumns.includes(column)
+                      }
+                      disabled={column === "title"}
+                      onChange={(event) =>
+                        toggleLibraryColumn(column, event.target.checked)
+                      }
+                    />
+                    <span className="truncate">
+                      {t(`field.${LIBRARY_FIELD_BY_COLUMN[column] ?? column}`)}
+                    </span>
+                  </label>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={index === 0}
+                      onClick={() => moveLibraryColumn(column, -1)}
+                      className="rounded border border-white/8 px-1.5 py-0.5 text-[10px] text-white/45 hover:text-white disabled:opacity-25"
+                      aria-label={t("settings.moveColumnUp")}
+                      title={t("settings.moveColumnUp")}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === ordered.length - 1}
+                      onClick={() => moveLibraryColumn(column, 1)}
+                      className="rounded border border-white/8 px-1.5 py-0.5 text-[10px] text-white/45 hover:text-white disabled:opacity-25"
+                      aria-label={t("settings.moveColumnDown")}
+                      title={t("settings.moveColumnDown")}
+                    >
+                      ↓
+                    </button>
+                  </span>
+                </div>
               ))}
             </div>
           </div>
@@ -1781,4 +2354,14 @@ function priorityLabel(key: string, t: (key: string) => string) {
       radioReady: "Radio Ready",
     } as Record<string, string>
   )[key] ?? key;
+}
+
+function uniqueValues(values: string[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const normalized = value.trim().toLocaleLowerCase();
+    if (!normalized || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
 }

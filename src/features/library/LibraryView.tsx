@@ -7,6 +7,7 @@ import { hasLibraryFolder } from "../../lib/libraryFolders";
 import {
   shortcutRatingFromKey,
   shortcutStatusFromKey,
+  findShortcutForEvent,
   shouldIgnoreKeyboardShortcut,
 } from "../../lib/keyboardShortcuts";
 import {
@@ -20,7 +21,9 @@ import type {
   LibraryFolderOption,
   MetadataEditSummary,
   MetadataPatch,
+  OrganizationOptions,
   OrganizationPatch,
+  Project,
   ScanSummary,
   SortDirection,
   TrackDetails,
@@ -28,6 +31,7 @@ import type {
   TrackSummary,
 } from "../../types/track";
 import { MetadataEditor } from "../editor/MetadataEditor";
+import { InternalOrganizationEditor } from "./InternalOrganizationEditor";
 import { TrackInspector } from "../inspector/TrackInspector";
 import { usePlayer } from "../player/PlayerContext";
 import { useSettings } from "../settings/SettingsContext";
@@ -40,9 +44,18 @@ import {
 import { TrackTable } from "./TrackTable";
 
 interface EditorSession {
+  kind: "metadata" | "organization";
   mode: "single" | "bulk";
   trackIds: number[];
 }
+
+const EMPTY_ORGANIZATION_OPTIONS: OrganizationOptions = {
+  tags: [],
+  projects: [],
+  versions: [],
+  models: [],
+  smartCollections: [],
+};
 
 interface PlaylistSession {
   trackIds: number[];
@@ -64,8 +77,8 @@ export function LibraryView({
   scanRequest = 0,
 }: {
   focusTrackId?: number;
-  onOpenSession?: (trackId: number, queueIds?: number[]) => void;
-  onOpenExplorerTrack?: (trackId: number) => void;
+  onOpenSession?: (trackId: number, queueIds?: number[], queueName?: string) => void;
+  onOpenExplorerTrack?: (trackId: number, queueIds?: number[]) => void;
   onStartReviewing?: (criterion?: ExplorerCriterion) => void;
   scanRequest?: number;
 }) {
@@ -93,6 +106,9 @@ export function LibraryView({
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [editorSession, setEditorSession] = useState<EditorSession | null>(null);
+  const [organizationOptions, setOrganizationOptions] = useState<OrganizationOptions>(
+    EMPTY_ORGANIZATION_OPTIONS,
+  );
   const [playlistSession, setPlaylistSession] = useState<PlaylistSession | null>(null);
   const [removeConfirmation, setRemoveConfirmation] =
     useState<RemoveConfirmation | null>(null);
@@ -107,9 +123,14 @@ export function LibraryView({
   const { settings, updateSettings } = useSettings();
   const { t } = useI18n();
   const pageSize = settings.library.visibleLimit;
+  const visibleLimitOptions = [1000, 5000, 10000, 20000] as const;
+  const nextVisibleLimit = visibleLimitOptions.find((limit) => limit > pageSize) ?? null;
   const showInspector =
     settings.layout.inspectorVisible && !settings.layout.focusMode;
-  const libraryTableColumns = visibleLibraryColumns(settings.fieldVisibility);
+  const libraryTableColumns = visibleLibraryColumns(
+    settings.fieldVisibility,
+    settings.library.columnOrder,
+  );
   const libraryInspectorFields = visibleFieldsForZone(
     settings.fieldVisibility,
     "libraryInspector",
@@ -124,7 +145,6 @@ export function LibraryView({
     togglePlayback,
     playNext,
     playPrevious,
-    currentTrack: playerCurrentTrack,
     state: playerState,
     stop,
   } = usePlayer();
@@ -192,9 +212,18 @@ export function LibraryView({
     }
   }, []);
 
+  const loadOrganizationOptions = useCallback(async () => {
+    try {
+      setOrganizationOptions(await api.getOrganizationOptions());
+    } catch (optionsError) {
+      setError(String(optionsError));
+    }
+  }, []);
+
   useEffect(() => {
     void loadFolders();
-  }, [loadFolders]);
+    void loadOrganizationOptions();
+  }, [loadFolders, loadOrganizationOptions]);
 
   useEffect(() => {
     if (folderPath && foldersLoaded && !hasLibraryFolder(folders, folderPath)) {
@@ -421,27 +450,26 @@ export function LibraryView({
     return selectedTrack;
   }, [selectedIds, selectedTrack, tracks]);
 
-  const playerHasActiveTrack = ["playing", "paused", "ended"].includes(
-    playerState.status,
-  );
-  const playingTrackId =
-    playerCurrentTrack?.id ??
-    (playerState.trackId !== null && playerHasActiveTrack
-      ? playerState.trackId
-      : null);
-
-  const explorerActionTrackId = playingTrackId ?? selectedActionTrack?.id ?? null;
+  const selectedActionTrackIdsInTableOrder = useMemo(() => {
+    if (selectedIds.size > 0) {
+      return tracks
+        .filter((track) => selectedIds.has(track.id))
+        .map((track) => track.id);
+    }
+    return selectedActionTrack ? [selectedActionTrack.id] : [];
+  }, [selectedActionTrack, selectedIds, tracks]);
 
   const hasActionSelection = selectedIds.size > 0 || selectedTrack !== null;
-  const canOpenExplorerTrack = explorerActionTrackId !== null;
+  const canOpenExplorerTrack = selectedActionTrackIdsInTableOrder.length > 0;
 
   const handleOpenSelectedInExplorer = useCallback(() => {
-    if (explorerActionTrackId === null) {
+    const [firstTrackId] = selectedActionTrackIdsInTableOrder;
+    if (!firstTrackId) {
       setNotice(t("library.selectSongsFirst"));
       return;
     }
-    onOpenExplorerTrack?.(explorerActionTrackId);
-  }, [explorerActionTrackId, onOpenExplorerTrack, t]);
+    onOpenExplorerTrack?.(firstTrackId, selectedActionTrackIdsInTableOrder);
+  }, [onOpenExplorerTrack, selectedActionTrackIdsInTableOrder, t]);
 
   const handleSelectionChange = useCallback((
     id: number,
@@ -520,6 +548,17 @@ export function LibraryView({
     [updateSettings],
   );
 
+  const increaseVisibleLimit = useCallback(() => {
+    if (!nextVisibleLimit) return;
+    updateSettings((current) => ({
+      ...current,
+      library: {
+        ...current.library,
+        visibleLimit: nextVisibleLimit,
+      },
+    }));
+  }, [nextVisibleLimit, updateSettings]);
+
   const handleMetadataSave = useCallback(async (
     patch: MetadataPatch,
   ): Promise<MetadataEditSummary> => {
@@ -571,6 +610,36 @@ export function LibraryView({
     setPlayerSelectedTrack,
     settings.metadata,
   ]);
+
+  const handleInternalOrganizationSave = useCallback(async (patch: OrganizationPatch) => {
+    if (!editorSession || editorSession.kind !== "organization") {
+      throw new Error(t("library.noActiveEditSelection"));
+    }
+    const trackIds = editorSession.trackIds;
+    const result = await api.updateTrackOrganization(trackIds, patch);
+    await Promise.all([loadLibrary(), loadOrganizationOptions()]);
+    if (selectedTrack && trackIds.includes(selectedTrack.id)) {
+      await refreshSelectedTrack(selectedTrack.id);
+    }
+    setError(null);
+    setNotice(
+      `${result.updated} ${result.updated === 1 ? t("organization.songUpdated") : t("organization.songsUpdated")}`,
+    );
+    setEditorSession(null);
+  }, [
+    editorSession,
+    loadLibrary,
+    loadOrganizationOptions,
+    refreshSelectedTrack,
+    selectedTrack,
+    t,
+  ]);
+
+  const handleCreateProjectFromEditor = useCallback(async (name: string): Promise<Project> => {
+    const project = await api.createProject(name);
+    await loadOrganizationOptions();
+    return project;
+  }, [loadOrganizationOptions]);
 
   const handleInlineMetadataSave = useCallback(async (patch: MetadataPatch) => {
     if (!selectedTrack) {
@@ -679,7 +748,7 @@ export function LibraryView({
   const openBulkEditor = useCallback(() => {
     const trackIds = [...selectedIds];
     if (trackIds.length > 0) {
-      setEditorSession({ mode: "bulk", trackIds });
+      setEditorSession({ kind: "metadata", mode: "bulk", trackIds });
     }
   }, [selectedIds]);
 
@@ -732,11 +801,29 @@ export function LibraryView({
   const handleEditSelected = useCallback(() => {
     const checkedTrackIds = [...selectedIds];
     if (checkedTrackIds.length > 0) {
-      setEditorSession({ mode: "bulk", trackIds: checkedTrackIds });
+      setEditorSession({ kind: "metadata", mode: "bulk", trackIds: checkedTrackIds });
     } else if (selectedTrack) {
-      setEditorSession({ mode: "single", trackIds: [selectedTrack.id] });
+      setEditorSession({ kind: "metadata", mode: "single", trackIds: [selectedTrack.id] });
     }
   }, [selectedIds, selectedTrack]);
+
+  const handleEditInternalOrganization = useCallback(() => {
+    const checkedTrackIds = [...selectedIds];
+    void loadOrganizationOptions();
+    if (checkedTrackIds.length > 0) {
+      setEditorSession({
+        kind: "organization",
+        mode: "bulk",
+        trackIds: checkedTrackIds,
+      });
+    } else if (selectedTrack) {
+      setEditorSession({
+        kind: "organization",
+        mode: "single",
+        trackIds: [selectedTrack.id],
+      });
+    }
+  }, [loadOrganizationOptions, selectedIds, selectedTrack]);
 
   const handleCloseEditor = useCallback(() => setEditorSession(null), []);
 
@@ -904,6 +991,95 @@ export function LibraryView({
     [refreshSelectedTrack, selectedOrCheckedTrackIds, selectedTrack, t],
   );
 
+  const applyCustomShortcut = useCallback(async (event: KeyboardEvent) => {
+    const rule = findShortcutForEvent(
+      settings.customKeyboardShortcuts ?? [],
+      "library",
+      event,
+    );
+    if (!rule) return false;
+    const trackIds = selectedOrCheckedTrackIds();
+    const value = rule.value.trim();
+    if (rule.field !== "action" && trackIds.length === 0) {
+      setNotice(t("library.selectSongForShortcut"));
+      return true;
+    }
+    if (rule.field === "rating") {
+      await Promise.all(
+        trackIds.map((id) =>
+          handleRatingChange(id, value === "clear" ? null : Number(value)),
+        ),
+      );
+    } else if (rule.field === "status" && value) {
+      await api.updateTrackOrganization(trackIds, { status: { value } });
+    } else if (rule.field === "mood") {
+      await api.updateTrackOrganization(trackIds, { mood: { value: value || null } });
+    } else if (rule.field === "internal_tag" && value) {
+      await api.updateTrackOrganization(trackIds, {
+        tagNames: [value],
+        tagMode: "add",
+      });
+    } else if (rule.field === "model") {
+      await api.updateTrackOrganization(trackIds, {
+        generationModel: { value: value || null },
+      });
+    } else if (rule.field === "language") {
+      await api.updateTrackOrganization(trackIds, {
+        language: { value: value || null },
+      });
+    } else if (rule.field === "next_action") {
+      await api.updateTrackOrganization(trackIds, {
+        nextAction: { value: value || null },
+      });
+    } else if (rule.field === "project") {
+      const project = organizationOptions.projects.find(
+        (item) =>
+          String(item.id) === value ||
+          item.name.toLocaleLowerCase() === value.toLocaleLowerCase(),
+      );
+      await api.updateTrackOrganization(trackIds, {
+        projectId: { value: project?.id ?? null },
+      });
+    } else if (rule.field === "action") {
+      if (value === "open_in_explorer") handleOpenSelectedInExplorer();
+      else if (value === "open_in_session" && onOpenSession) {
+        const [firstId] = selectedActionTrackIdsInTableOrder;
+        if (firstId) onOpenSession(firstId, selectedActionTrackIdsInTableOrder);
+      } else if (value === "clear_selection") handleClearSelectionShortcut();
+      else if (value === "play_pause") await togglePlayback();
+      else if (value === "next") await playNext();
+      else if (value === "previous") await playPrevious();
+      else if (value === "reset_zoom") changeLibraryInspectorZoom("reset");
+      else return false;
+      return true;
+    } else {
+      return false;
+    }
+    await loadLibrary();
+    if (selectedTrack && trackIds.includes(selectedTrack.id)) {
+      await refreshSelectedTrack(selectedTrack.id);
+    }
+    setNotice(t("library.curationFieldSaved"));
+    return true;
+  }, [
+    changeLibraryInspectorZoom,
+    handleClearSelectionShortcut,
+    handleOpenSelectedInExplorer,
+    handleRatingChange,
+    loadLibrary,
+    onOpenSession,
+    organizationOptions.projects,
+    playNext,
+    playPrevious,
+    refreshSelectedTrack,
+    selectedActionTrackIdsInTableOrder,
+    selectedOrCheckedTrackIds,
+    selectedTrack,
+    settings.customKeyboardShortcuts,
+    t,
+    togglePlayback,
+  ]);
+
   const selectTrackByOffset = useCallback(
     (offset: -1 | 1) => {
       if (tracks.length === 0) return;
@@ -924,7 +1100,7 @@ export function LibraryView({
 
   useEffect(() => {
     if (!settings.keyboardShortcutsEnabled) return;
-    function onKeyDown(event: KeyboardEvent) {
+    async function onKeyDown(event: KeyboardEvent) {
       if (shouldIgnoreKeyboardShortcut(event)) return;
       const zoomAction = panelZoomActionFromKey(event.key, event.ctrlKey || event.metaKey);
       if (zoomAction) {
@@ -933,26 +1109,11 @@ export function LibraryView({
         return;
       }
 
-      const ratingShortcut = shortcutRatingFromKey(event.key);
-      if (ratingShortcut !== null && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        event.preventDefault();
-        void applyShortcutRating(ratingShortcut);
-        return;
-      }
-
       if (event.ctrlKey && event.key.toLowerCase() === "a") {
         event.preventDefault();
         handleSelectAllVisibleShortcut();
         return;
       }
-
-      const statusShortcut = shortcutStatusFromKey(event.key);
-      if (statusShortcut) {
-        event.preventDefault();
-        void applyShortcutStatus(statusShortcut);
-        return;
-      }
-
       if (event.key === " ") {
         event.preventDefault();
         void togglePlayback();
@@ -996,6 +1157,30 @@ export function LibraryView({
       if (event.key === "Delete") {
         event.preventDefault();
         void handleRemoveSelected();
+        return;
+      }
+
+      const customShortcut = findShortcutForEvent(
+        settings.customKeyboardShortcuts ?? [],
+        "library",
+        event,
+      );
+      if (customShortcut && await applyCustomShortcut(event)) {
+        event.preventDefault();
+        return;
+      }
+
+      const ratingShortcut = shortcutRatingFromKey(event.key);
+      if (ratingShortcut !== null && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        void applyShortcutRating(ratingShortcut);
+        return;
+      }
+
+      const statusShortcut = shortcutStatusFromKey(event.key);
+      if (statusShortcut) {
+        event.preventDefault();
+        void applyShortcutStatus(statusShortcut);
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -1044,9 +1229,28 @@ export function LibraryView({
                 <p className="text-xs text-white/40">
                   {total} {total === 1 ? t("library.song") : t("library.songs")}
                   {folderPath ? ` ${t("explorer.inThisFolder")}` : ""}
-                  {total > pageSize ? `, ${t("library.showing")} ${pageSize}` : ""}
+                  {total > tracks.length
+                    ? `, ${t("library.showing")} ${tracks.length} ${t("common.of")} ${total}`
+                    : ""}
                 </p>
               </div>
+              {total > tracks.length && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/40">
+                  <span>{t("library.visibleLimitNotice")}</span>
+                  {nextVisibleLimit && (
+                    <button
+                      type="button"
+                      onClick={increaseVisibleLimit}
+                      className="text-[#d9ff43]/75 hover:text-[#d9ff43]"
+                    >
+                      {t("library.increaseVisibleLimit").replace(
+                        "{count}",
+                        String(nextVisibleLimit),
+                      )}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1126,15 +1330,17 @@ export function LibraryView({
               <button
                 type="button"
                 onClick={() => {
-                  const orderedIds =
-                    selectedIds.size > 0
-                      ? tracks
-                          .filter((track) => selectedIds.has(track.id))
-                          .map((track) => track.id)
-                      : selectedTrack
-                        ? [selectedTrack.id]
-                        : [];
-                  if (orderedIds[0]) onOpenSession(orderedIds[0], orderedIds);
+                  const orderedIds = selectedActionTrackIdsInTableOrder;
+                  if (orderedIds[0]) {
+                    onOpenSession(
+                      orderedIds[0],
+                      orderedIds,
+                      t("session.librarySelectionQueue").replace(
+                        "{count}",
+                        String(orderedIds.length),
+                      ),
+                    );
+                  }
                 }}
                 disabled={!hasActionSelection}
                 title={selectionRequiredTitle}
@@ -1190,6 +1396,21 @@ export function LibraryView({
                 {t("common.edit")} {selectedIds.size}
               </button>
             )}
+            <button
+              type="button"
+              onClick={handleEditInternalOrganization}
+              disabled={!hasActionSelection}
+              title={selectionRequiredTitle}
+              className="toolbar-button disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              <Pencil size={16} />
+              {selectedIds.size > 1
+                ? t("library.editInternalOrganizationBulk").replace(
+                    "{count}",
+                    String(selectedIds.size),
+                  )
+                : t("library.editInternalOrganization")}
+            </button>
             {selectedIds.size >= 2 && (
               <button
                 type="button"
@@ -1298,6 +1519,7 @@ export function LibraryView({
             onSelectionChange={handleSelectionChange}
             onSelectAll={handleSelectAll}
             visibleColumns={libraryTableColumns}
+            columnOrder={settings.library.columnOrder}
             doubleClickPlays={settings.player.doubleClickPlay}
           />
         </div>
@@ -1323,7 +1545,7 @@ export function LibraryView({
       )}
       </div>
 
-      {editorSession && (
+      {editorSession?.kind === "metadata" && (
         <MetadataEditor
           mode={editorSession.mode}
           selectedCount={editorSession.trackIds.length}
@@ -1331,6 +1553,17 @@ export function LibraryView({
           metadata={editorSession.mode === "single" ? selectedMetadata : null}
           onClose={handleCloseEditor}
           onSave={handleMetadataSave}
+        />
+      )}
+      {editorSession?.kind === "organization" && (
+        <InternalOrganizationEditor
+          mode={editorSession.mode}
+          selectedCount={editorSession.trackIds.length}
+          track={editorSession.mode === "single" ? selectedTrack : null}
+          options={organizationOptions}
+          onClose={handleCloseEditor}
+          onCreateProject={handleCreateProjectFromEditor}
+          onSave={handleInternalOrganizationSave}
         />
       )}
       {playlistSession && (

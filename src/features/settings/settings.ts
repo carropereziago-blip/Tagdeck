@@ -3,6 +3,33 @@ import { clampPanelZoom } from "../../lib/panelZoom";
 
 export type InterfaceLanguage = "en" | "es";
 
+export type ShortcutContext = "global" | "library" | "explorer" | "session";
+export type ShortcutField =
+  | "rating"
+  | "status"
+  | "genre"
+  | "mood"
+  | "internal_tag"
+  | "project"
+  | "model"
+  | "language"
+  | "next_action"
+  | "action";
+
+export interface ShortcutRule {
+  id: string;
+  enabled: boolean;
+  context: ShortcutContext;
+  field: ShortcutField;
+  value: string;
+  key: string;
+  code?: string;
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+}
+
 export const LIBRARY_COLUMNS = [
   "title",
   "artist",
@@ -26,6 +53,7 @@ export const LIBRARY_COLUMNS = [
   "path",
   "reviewedAt",
   "intendedUse",
+  "generationModel",
 ] as const;
 
 export type LibraryColumn = (typeof LIBRARY_COLUMNS)[number];
@@ -176,6 +204,7 @@ export const FIELD_VISIBILITY_CAPABILITIES = {
       "reviewedAt",
       "intendedUse",
       "path",
+      "generationModel",
     ],
   },
   libraryInspector: {
@@ -362,6 +391,7 @@ const LIBRARY_COLUMN_BY_FIELD: Partial<Record<FieldVisibilityField, LibraryColum
   path: "path",
   reviewedAt: "reviewedAt",
   intendedUse: "intendedUse",
+  generationModel: "generationModel",
 };
 
 export interface AppSettings {
@@ -371,14 +401,16 @@ export interface AppSettings {
   hasSeenOnboarding: boolean;
   hiddenSectionOnboarding: SectionOnboardingConfig;
   keyboardShortcutsEnabled: boolean;
+  customKeyboardShortcuts: ShortcutRule[];
   appearance: {
     theme: "dark" | "studio" | "soundbender-light" | "soft-light";
     interfaceSize: "compact" | "normal" | "wide";
     textSize: "small" | "normal" | "large";
   };
   library: {
-    visibleLimit: 500 | 1000 | 2000 | 3000 | 5000;
+    visibleLimit: 1000 | 5000 | 10000 | 20000;
     visibleColumns: LibraryColumn[];
+    columnOrder: LibraryColumn[];
     rememberFilters: boolean;
     rememberScanFolder: boolean;
     lastScanFolder: string;
@@ -603,6 +635,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hasSeenOnboarding: false,
   hiddenSectionOnboarding: resetSectionOnboarding(),
   keyboardShortcutsEnabled: true,
+  customKeyboardShortcuts: defaultKeyboardShortcuts(),
   appearance: {
     theme: "studio",
     interfaceSize: "normal",
@@ -611,6 +644,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   library: {
     visibleLimit: 1000,
     visibleColumns: visibleLibraryColumns(DEFAULT_FIELD_VISIBILITY),
+    columnOrder: [...LIBRARY_COLUMNS],
     rememberFilters: true,
     rememberScanFolder: true,
     lastScanFolder: "",
@@ -635,7 +669,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     showGlobalBar: true,
   },
   explorer: {
-    defaultCriterion: "unreviewed",
+    defaultCriterion: "all",
     autoplayOnLoad: false,
     autoplayAfterSave: true,
     autoplayAfterSkip: false,
@@ -701,6 +735,7 @@ export function normalizeSettings(value: unknown): AppSettings {
     result.hiddenSectionOnboarding,
   );
   result.keyboardShortcutsEnabled = result.keyboardShortcutsEnabled !== false;
+  result.customKeyboardShortcuts = normalizeShortcutRules(result.customKeyboardShortcuts);
   result.appearance.theme = oneOf(
     result.appearance.theme,
     ["dark", "studio", "soundbender-light", "soft-light"],
@@ -718,7 +753,7 @@ export function normalizeSettings(value: unknown): AppSettings {
   );
   result.library.visibleLimit = oneOf(
     result.library.visibleLimit,
-    [500, 1000, 2000, 3000, 5000],
+    [1000, 5000, 10000, 20000],
     1000,
   );
   if (!result.library.visibleColumns.includes("title")) {
@@ -728,8 +763,12 @@ export function normalizeSettings(value: unknown): AppSettings {
     (column, index, columns) =>
       LIBRARY_COLUMNS.includes(column) && columns.indexOf(column) === index,
   );
+  result.library.columnOrder = normalizeLibraryColumnOrder(result.library.columnOrder);
   result.fieldVisibility = normalizeFieldVisibility(result.fieldVisibility);
-  result.library.visibleColumns = visibleLibraryColumns(result.fieldVisibility);
+  result.library.visibleColumns = visibleLibraryColumns(
+    result.fieldVisibility,
+    result.library.columnOrder,
+  );
   result.layout.sidebarMode = oneOf(
     result.layout.sidebarMode,
     ["expanded", "collapsed", "hidden"],
@@ -870,11 +909,33 @@ export function visibleFieldsForZone(
   return new Set(ensureZoneMinimum(zone, config?.[zone] ?? DEFAULT_FIELD_VISIBILITY[zone]));
 }
 
-export function visibleLibraryColumns(config: FieldVisibilityConfig) {
+export function visibleLibraryColumns(
+  config: FieldVisibilityConfig,
+  order: readonly LibraryColumn[] = LIBRARY_COLUMNS,
+) {
   const columns = Array.from(visibleFieldsForZone(config, "libraryTable"))
     .map((field) => LIBRARY_COLUMN_BY_FIELD[field])
     .filter((column): column is LibraryColumn => Boolean(column));
-  return [...new Set(["title" as LibraryColumn, ...columns])];
+  const visible = new Set(["title" as LibraryColumn, ...columns]);
+  const normalizedOrder = normalizeLibraryColumnOrder(order);
+  return [
+    ...normalizedOrder.filter((column) => visible.has(column)),
+    ...columns.filter((column) => !normalizedOrder.includes(column)),
+  ];
+}
+
+export function normalizeLibraryColumnOrder(value: unknown): LibraryColumn[] {
+  const candidate = Array.isArray(value) ? value : [];
+  const ordered = candidate.filter(
+    (column, index, columns): column is LibraryColumn =>
+      typeof column === "string" &&
+      LIBRARY_COLUMNS.includes(column as LibraryColumn) &&
+      columns.indexOf(column) === index,
+  );
+  return [
+    ...ordered,
+    ...LIBRARY_COLUMNS.filter((column) => !ordered.includes(column)),
+  ];
 }
 
 export function isFieldSupportedInZone(
@@ -891,6 +952,106 @@ export function isFieldRequiredInZone(
 ) {
   return (FIELD_VISIBILITY_CAPABILITIES[zone].required as readonly FieldVisibilityField[])
     .includes(field);
+}
+
+export function defaultKeyboardShortcuts(): ShortcutRule[] {
+  const ratingRules = Array.from({ length: 10 }, (_, index) => {
+    const rating = index + 1;
+    return shortcutRule(
+      `default-rating-${rating}`,
+      "global",
+      "rating",
+      String(rating),
+      rating === 10 ? "0" : String(rating),
+    );
+  });
+  return [
+    ...ratingRules,
+    shortcutRule("default-status-selected", "global", "status", "selected", "R"),
+    shortcutRule("default-status-generating", "global", "status", "generating", "D"),
+    shortcutRule("default-status-archived", "global", "status", "archived", "A"),
+    shortcutRule("default-status-idea", "global", "status", "idea", "I"),
+    shortcutRule("default-status-editing", "global", "status", "editing", "P"),
+    shortcutRule("default-status-review", "global", "status", "review", "U"),
+    shortcutRule("default-action-play", "global", "action", "play_pause", "Space"),
+    shortcutRule("default-action-next", "global", "action", "next", "ArrowRight"),
+    shortcutRule("default-action-previous", "global", "action", "previous", "ArrowLeft"),
+    shortcutRule("default-action-clear", "global", "action", "clear_selection", "Escape"),
+    shortcutRule("default-action-reset-zoom", "global", "action", "reset_zoom", "0", {
+      ctrl: true,
+    }),
+  ];
+}
+
+function shortcutRule(
+  id: string,
+  context: ShortcutContext,
+  field: ShortcutField,
+  value: string,
+  key: string,
+  modifiers: Partial<Pick<ShortcutRule, "ctrl" | "alt" | "shift" | "meta">> = {},
+): ShortcutRule {
+  return {
+    id,
+    enabled: true,
+    context,
+    field,
+    value,
+    key,
+    ctrl: modifiers.ctrl ?? false,
+    alt: modifiers.alt ?? false,
+    shift: modifiers.shift ?? false,
+    meta: modifiers.meta ?? false,
+  };
+}
+
+export function normalizeShortcutRules(value: unknown): ShortcutRule[] {
+  const input = Array.isArray(value) ? value : defaultKeyboardShortcuts();
+  const seen = new Set<string>();
+  return input
+    .filter(isRecord)
+    .map((rule, index): ShortcutRule => {
+      const context = oneOf(
+        rule.context,
+        ["global", "library", "explorer", "session"],
+        "explorer",
+      ) as ShortcutContext;
+      const field = oneOf(
+        rule.field,
+        [
+          "rating",
+          "status",
+          "genre",
+          "mood",
+          "internal_tag",
+          "project",
+          "model",
+          "language",
+          "next_action",
+          "action",
+        ],
+        "rating",
+      ) as ShortcutField;
+      const id =
+        typeof rule.id === "string" && rule.id.trim()
+          ? rule.id.trim()
+          : `shortcut-${index + 1}`;
+      const uniqueId = seen.has(id) ? `${id}-${index + 1}` : id;
+      seen.add(uniqueId);
+      return {
+        id: uniqueId,
+        enabled: rule.enabled !== false,
+        context,
+        field,
+        value: typeof rule.value === "string" ? rule.value : "",
+        key: typeof rule.key === "string" ? rule.key : "",
+        code: typeof rule.code === "string" ? rule.code : undefined,
+        ctrl: Boolean(rule.ctrl),
+        alt: Boolean(rule.alt),
+        shift: Boolean(rule.shift),
+        meta: Boolean(rule.meta),
+      };
+    });
 }
 
 function mergeDefaults(defaults: unknown, source: unknown): unknown {

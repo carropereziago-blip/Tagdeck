@@ -26,6 +26,7 @@ import { filterTracksByFolder, hasLibraryFolder } from "../../lib/libraryFolders
 import {
   shortcutRatingFromKey,
   shortcutStatusFromKey,
+  findShortcutForEvent,
   shouldIgnoreKeyboardShortcut,
 } from "../../lib/keyboardShortcuts";
 import { api } from "../../lib/tauri";
@@ -62,6 +63,7 @@ import {
 interface SessionViewProps {
   initialTrackId?: number;
   initialQueueIds?: number[];
+  initialQueueName?: string;
   onOpenTrack: (section: "library" | "organization", trackId: number) => void;
 }
 
@@ -135,6 +137,7 @@ const SESSION_CRITERIA: SessionCriterion[] = [
 export function SessionView({
   initialTrackId,
   initialQueueIds,
+  initialQueueName,
   onOpenTrack,
 }: SessionViewProps) {
   const player = usePlayer();
@@ -181,6 +184,7 @@ export function SessionView({
   });
   const [sessionCriterion, setSessionCriterion] = useState<SessionCriterion>("all");
   const [loading, setLoading] = useState(true);
+  const [prepareRetryNonce, setPrepareRetryNonce] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [focusedResultId, setFocusedResultId] = useState<number | null>(null);
@@ -201,13 +205,28 @@ export function SessionView({
     [playPlayerTrack, setSelectedTrack],
   );
 
+  const loadTrackRef = useRef(loadTrack);
+
+  useEffect(() => {
+    loadTrackRef.current = loadTrack;
+  }, [loadTrack]);
+
+  const initialSessionKey = useMemo(
+    () => `${initialTrackId ?? ""}:${initialQueueIds?.join(",") ?? ""}:${initialQueueName ?? ""}`,
+    [initialQueueIds, initialQueueName, initialTrackId],
+  );
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    void api
-      .getLibraryTracks(LIBRARY_QUERY)
-      .then(async (page) => {
+    if (import.meta.env.DEV) {
+      console.debug("[Session] prepare start", { initialSessionKey });
+    }
+
+    async function prepareSession() {
+      try {
+        const page = await api.getLibraryTracks(LIBRARY_QUERY);
         if (cancelled) return;
         setLibrary(page.items);
         const byId = new Map(page.items.map((item) => [item.id, item]));
@@ -237,17 +256,32 @@ export function SessionView({
         setHistory([]);
         setPlayedIds(new Set());
         setActivePlaylistId(null);
-        setActivePlaylistName(null);
-        await loadTrack(first, Boolean(initialTrackId || initialQueueIds?.length));
-      })
-      .catch((loadError) => setError(String(loadError)))
-      .finally(() => {
+        setActivePlaylistName(initialQueueName ?? null);
+        await loadTrackRef.current(first, Boolean(initialTrackId || initialQueueIds?.length));
+        if (import.meta.env.DEV) {
+          console.debug("[Session] prepare success", {
+            queueLength: nextQueue.length,
+            trackId: first.id,
+          });
+        }
+      } catch (loadError) {
+        if (import.meta.env.DEV) {
+          console.debug("[Session] prepare error", loadError);
+        }
+        if (!cancelled) setError(String(loadError));
+      } finally {
+        if (import.meta.env.DEV) {
+          console.debug("[Session] prepare finally", { cancelled });
+        }
         if (!cancelled) setLoading(false);
-      });
+      }
+    }
+
+    void prepareSession();
     return () => {
       cancelled = true;
     };
-  }, [initialQueueIds, initialTrackId, loadTrack]);
+  }, [initialSessionKey, prepareRetryNonce]);
 
   useEffect(() => {
     void api
@@ -291,7 +325,6 @@ export function SessionView({
       setHistory((current) => [...current, track]);
       setPlayedIds((current) => new Set(current).add(track.id));
     }
-    setQueue((current) => current.filter((item) => item.id !== currentId));
     setTrack(player.currentTrack);
   }, [library, player.currentTrack, track]);
 
@@ -428,18 +461,20 @@ export function SessionView({
 
   async function playNow(
     summary: TrackSummary,
-    options: { preserveActivePlaylist?: boolean } = {},
+    options: { preserveActivePlaylist?: boolean; removeFromQueue?: boolean } = {},
   ) {
     try {
       if (track) {
         setHistory((current) => [...current, track]);
         setPlayedIds((current) => new Set(current).add(track.id));
       }
-      if (!options.preserveActivePlaylist) {
+      if (options.preserveActivePlaylist === false) {
         setActivePlaylistId(null);
         setActivePlaylistName(null);
       }
-      setQueue((current) => current.filter((item) => item.id !== summary.id));
+      if (options.removeFromQueue) {
+        setQueue((current) => current.filter((item) => item.id !== summary.id));
+      }
       await loadTrack(summary, true, "user_click");
     } catch (playError) {
       setError(String(playError));
@@ -563,6 +598,72 @@ export function SessionView({
     }
   }
 
+  async function applyCustomShortcut(event: KeyboardEvent) {
+    const rule = findShortcutForEvent(
+      settings.customKeyboardShortcuts ?? [],
+      "session",
+      event,
+    );
+    if (!rule) return false;
+    const value = rule.value.trim();
+    if (rule.field === "rating") {
+      await updateRating(value === "clear" ? "" : value);
+    } else if (rule.field === "status" && value) {
+      await updateStatus(value as SongStatus);
+    } else if (rule.field === "mood" && track) {
+      const current = splitValues(track.mood ?? "");
+      const next = current.some((item) => item.toLocaleLowerCase() === value.toLocaleLowerCase())
+        ? current
+        : [...current, value].filter(Boolean);
+      const updated = await api.saveCuration({
+        trackId: track.id,
+        rating: track.rating,
+        organization: {},
+        strongPart: track.strongPart,
+        mainProblem: track.mainProblem,
+        intendedUse: track.intendedUse,
+        mood: next.join(", ") || null,
+        generationModel: track.generationModel,
+      });
+      replaceTrack(updated);
+    } else if (rule.field === "internal_tag" && track && value) {
+      await api.updateTrackOrganization([track.id], {
+        tagNames: [value],
+        tagMode: "add",
+      });
+      await refreshTrack(track.id);
+    } else if (rule.field === "model") {
+      await updateModel(value);
+    } else if (rule.field === "language" && track) {
+      await api.updateTrackOrganization([track.id], {
+        language: { value: value || null },
+      });
+      await refreshTrack(track.id);
+    } else if (rule.field === "next_action" && track) {
+      await api.updateTrackOrganization([track.id], {
+        nextAction: { value: value || null },
+      });
+      await refreshTrack(track.id);
+    } else if (rule.field === "project") {
+      const project = organizationOptions.projects.find(
+        (item) =>
+          String(item.id) === value ||
+          item.name.toLocaleLowerCase() === value.toLocaleLowerCase(),
+      );
+      await updateProject(project ? String(project.id) : "");
+    } else if (rule.field === "action") {
+      if (value === "play_pause") await player.togglePlayback();
+      else if (value === "next") await playNext();
+      else if (value === "previous") await playPrevious();
+      else if (value === "add_to_playlist" && track) setPlaylistTrackIds([track.id]);
+      else if (value === "reset_zoom") return true;
+      else return false;
+    } else {
+      return false;
+    }
+    return true;
+  }
+
   async function refreshTrack(id: number) {
     const updated = await api.getTrack(id);
     replaceTrack(updated);
@@ -596,13 +697,23 @@ export function SessionView({
 
   useEffect(() => {
     if (!settings.keyboardShortcutsEnabled) return;
-    function onKeyDown(event: KeyboardEvent) {
+    async function onKeyDown(event: KeyboardEvent) {
       if (shouldIgnoreKeyboardShortcut(event)) return;
 
       const focusedTrack =
         focusedResultId === null
           ? null
           : focusableSessionTracks.find((item) => item.id === focusedResultId) ?? null;
+
+      const customShortcut = findShortcutForEvent(
+        settings.customKeyboardShortcuts ?? [],
+        "session",
+        event,
+      );
+      if (customShortcut && await applyCustomShortcut(event)) {
+        event.preventDefault();
+        return;
+      }
 
       const ratingShortcut = shortcutRatingFromKey(event.key);
       if (ratingShortcut !== null) {
@@ -772,9 +883,16 @@ export function SessionView({
         </p>
       )}
       {error && (
-        <p className="border-b border-red-400/15 bg-red-400/7 px-6 py-2 text-xs text-red-200">
-          {error}
-        </p>
+        <div className="flex items-center justify-between gap-3 border-b border-red-400/15 bg-red-400/7 px-6 py-2 text-xs text-red-200">
+          <span>{t("session.prepareFailed")} {error}</span>
+          <button
+            type="button"
+            onClick={() => setPrepareRetryNonce((current) => current + 1)}
+            className="rounded border border-red-200/25 px-2 py-1 text-red-100 hover:bg-red-200/10"
+          >
+            {t("session.retry")}
+          </button>
+        </div>
       )}
 
       {!track ? (
@@ -972,7 +1090,7 @@ export function SessionView({
                   {t("session.activePlaylist")}: {activePlaylistName}
                 </p>
               )}
-              {activePlaylistId && track && (
+              {activePlaylistName && track && (
                 <p className="mb-3 text-[10px] text-white/35">
                   {t("library.song")} {history.length + 1} {t("common.of")} {history.length + queue.length + 1}
                 </p>
@@ -981,7 +1099,7 @@ export function SessionView({
                 <div>
                   <h3 className="font-semibold">{t("session.sessionQueue")}</h3>
                   <p className="mt-0.5 text-xs text-white/35">
-                    {queue.length} pendientes
+                    {queue.length} {t("session.pending")}
                   </p>
                 </div>
                 <button
@@ -1008,7 +1126,7 @@ export function SessionView({
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {activePlaylistId && track && (
+              {activePlaylistName && track && (
                 <div className="mb-1 flex items-center gap-2 rounded-md border border-[#d9ff43]/30 bg-[#d9ff43]/10 px-2 py-2">
                   <span className="w-5 text-center text-[10px] font-semibold text-[#d9ff43]/80">
                     {history.length + 1}
@@ -1033,14 +1151,19 @@ export function SessionView({
                 >
                   <span className="w-5 text-center text-[10px] text-white/25">
                     {sessionQueueFields.has("playOrder") || sessionQueueFields.has("playlistPosition")
-                      ? activePlaylistId && track
+                      ? activePlaylistName && track
                         ? history.length + index + 2
                         : index + 1
                       : ""}
                   </span>
                   <button
                     type="button"
-                    onClick={() => void playNow(item, { preserveActivePlaylist: Boolean(activePlaylistId) })}
+                    onClick={() =>
+                      void playNow(item, {
+                        preserveActivePlaylist: true,
+                        removeFromQueue: true,
+                      })
+                    }
                     className="min-w-0 flex-1 text-left"
                   >
                     <p hidden={!sessionQueueFields.has("title") && !sessionQueueFields.has("fileName")} className="truncate text-xs text-white/70">
@@ -1596,6 +1719,13 @@ function Badge({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+function splitValues(value: string) {
+  return value
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function SaveSessionQueueDialog({

@@ -228,6 +228,63 @@ function addDropdownCustomValue(
 }
 
 describe("ExplorerView", () => {
+  it("muestra criterios unicos con All primero y permite cargar All", async () => {
+    prepareQueue([summary(1, "Primera"), summary(2, "Segunda")]);
+    const view = render(<ExplorerView onNavigate={vi.fn()} />);
+    await view.findByRole("heading", { name: "Primera" });
+
+    const criterion = view.getByLabelText("Criterio") as HTMLSelectElement;
+    const options = Array.from(criterion.options);
+    const values = options.map((option) => option.value);
+
+    expect(values[0]).toBe("all");
+    expect(values.filter((value) => value === "all")).toHaveLength(1);
+    expect(new Set(values).size).toBe(values.length);
+    expect(options.filter((option) => option.textContent === "Todos")).toHaveLength(1);
+    expect(options.find((option) => option.value === "random")?.textContent).toBe(
+      "Aleatorias",
+    );
+
+    fireEvent.change(criterion, { target: { value: "all" } });
+
+    await waitFor(() =>
+      expect(mocks.getExplorerTracks).toHaveBeenLastCalledWith({
+        criterion: "all",
+        limit: 1_000,
+        folderPath: null,
+        smartCollection: null,
+      }),
+    );
+  });
+
+  it("abre una cola temporal de canciones seleccionadas desde Biblioteca", async () => {
+    const items = [summary(1, "Primera"), summary(2, "Segunda")];
+    prepareQueue(items);
+    const view = render(
+      <ExplorerView
+        onNavigate={vi.fn()}
+        initialCriterion="all"
+        initialQueueIds={[2, 1]}
+        focusTrackId={2}
+      />,
+    );
+
+    await view.findByRole("heading", { name: "Segunda" });
+    expect(mocks.getExplorerTracks).not.toHaveBeenCalled();
+    expect(mocks.getTrack).toHaveBeenCalledWith(2);
+    expect(mocks.getTrack).toHaveBeenCalledWith(1);
+    const criterion = view.getByLabelText("Criterio") as HTMLSelectElement;
+    expect(criterion.value).toBe("library_selection");
+    expect(
+      Array.from(criterion.options).filter((option) => option.value === "library_selection"),
+    ).toHaveLength(1);
+    expect(mocks.setLibraryTracks).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 2 }), expect.objectContaining({ id: 1 })],
+      "explorer",
+      expect.any(Object),
+    );
+  });
+
   it("abre una cancion enfocada desde Biblioteca como pista activa", async () => {
     const first = summary(1, "Primera");
     const focused = summary(2, "Cancion enfocada");

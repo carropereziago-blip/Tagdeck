@@ -99,6 +99,33 @@ describe("TrackTable", () => {
     expect(screen.queryByRole("columnheader", { name: /Ruta/i })).not.toBeInTheDocument();
   });
 
+  it("respeta el orden configurable de columnas", () => {
+    render(
+      <TrackTable
+        tracks={[track(1, "Y:\\Suno\\tema.mp3", "tema.mp3")]}
+        selectedId={null}
+        selectedIds={new Set()}
+        sortBy="title"
+        sortDirection="asc"
+        loading={false}
+        onSort={vi.fn()}
+        onSelect={vi.fn()}
+        onPlay={vi.fn()}
+        onExternalDrag={vi.fn()}
+        onRatingChange={vi.fn()}
+        onSelectionChange={vi.fn()}
+        onSelectAll={vi.fn()}
+        visibleColumns={["title", "rating", "artist"]}
+        columnOrder={["rating", "title", "artist"]}
+      />,
+    );
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent ?? "");
+    expect(headers.join(" ")).toMatch(/Rating.*T.tulo.*Artista/);
+  });
+
   it("propaga shiftKey al seleccionar desde checkbox", () => {
     const onSelectionChange = vi.fn();
     render(

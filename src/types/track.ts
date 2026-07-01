@@ -53,6 +53,7 @@ export interface TrackSummary {
   mainProblem: string | null;
   intendedUse: string | null;
   mood: string | null;
+  language?: string | null;
   generationModel: string | null;
   reviewedAt: string | null;
   lastReviewedAt: string | null;
@@ -117,12 +118,22 @@ export interface OrganizationOptions {
 }
 
 export interface OrganizationPatch {
+  rating?: MetadataFieldUpdate<number>;
   status?: MetadataFieldUpdate<string>;
   workflowNotes?: MetadataFieldUpdate<string>;
+  workflowNotesMode?: "replace" | "append";
   nextAction?: MetadataFieldUpdate<string>;
+  nextActionMode?: "replace" | "append";
   versionLabel?: MetadataFieldUpdate<string>;
   projectId?: MetadataFieldUpdate<number>;
+  mood?: MetadataFieldUpdate<string>;
+  strongPart?: MetadataFieldUpdate<string>;
+  mainProblem?: MetadataFieldUpdate<string>;
+  intendedUse?: MetadataFieldUpdate<string>;
+  language?: MetadataFieldUpdate<string>;
+  generationModel?: MetadataFieldUpdate<string>;
   tagNames?: string[];
+  tagMode?: "add" | "remove" | "replace";
 }
 
 export type ExplorerCriterion =

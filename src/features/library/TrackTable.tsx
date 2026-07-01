@@ -39,6 +39,7 @@ interface TrackTableProps {
   ) => void;
   onSelectAll: (selected: boolean) => void;
   visibleColumns?: LibraryColumn[];
+  columnOrder?: LibraryColumn[];
   doubleClickPlays?: boolean;
 }
 
@@ -62,6 +63,7 @@ export const TrackTable = memo(function TrackTable({
   onSelectionChange,
   onSelectAll,
   visibleColumns = DEFAULT_LIBRARY_COLUMNS,
+  columnOrder = DEFAULT_LIBRARY_COLUMNS,
   doubleClickPlays = true,
 }: TrackTableProps) {
   const { t, language } = useI18n();
@@ -165,6 +167,10 @@ export const TrackTable = memo(function TrackTable({
         cell: (info) => info.getValue() || EMPTY_VALUE,
         meta: { sortField: "mood" satisfies TrackSortField },
       }),
+      columnHelper.accessor("generationModel", {
+        header: t("field.generationModel"),
+        cell: (info) => info.getValue() || EMPTY_VALUE,
+      }),
       columnHelper.accessor("year", {
         header: t("field.year"),
         cell: (info) => info.getValue() ?? EMPTY_VALUE,
@@ -258,6 +264,11 @@ export const TrackTable = memo(function TrackTable({
     columns,
     getCoreRowModel: getCoreRowModel(),
     state: {
+      columnOrder: [
+        "drag",
+        "selection",
+        ...columnOrder.map((column) => LIBRARY_COLUMN_TABLE_IDS[column]),
+      ],
       columnVisibility: {
         trackNumber: visibleColumns.includes("trackNumber"),
         title: visibleColumns.includes("title"),
@@ -271,6 +282,7 @@ export const TrackTable = memo(function TrackTable({
         versionLabel: visibleColumns.includes("version"),
         tagNames: visibleColumns.includes("tags"),
         mood: visibleColumns.includes("mood"),
+        generationModel: visibleColumns.includes("generationModel"),
         durationMs: visibleColumns.includes("duration"),
         audioFormat: visibleColumns.includes("format"),
         bpm: visibleColumns.includes("bpm"),
@@ -433,6 +445,32 @@ export const TrackTable = memo(function TrackTable({
     </div>
   );
 });
+
+const LIBRARY_COLUMN_TABLE_IDS: Record<LibraryColumn, string> = {
+  title: "title",
+  artist: "artist",
+  album: "album",
+  albumArtist: "albumArtist",
+  genre: "genre",
+  year: "year",
+  trackNumber: "trackNumber",
+  rating: "rating",
+  status: "status",
+  project: "projectName",
+  version: "versionLabel",
+  tags: "tagNames",
+  mood: "mood",
+  duration: "durationMs",
+  format: "audioFormat",
+  bpm: "bpm",
+  musicalKey: "musicalKey",
+  playCount: "playCount",
+  nextAction: "nextAction",
+  path: "filePath",
+  reviewedAt: "reviewedAt",
+  intendedUse: "intendedUse",
+  generationModel: "generationModel",
+};
 
 interface VirtualTrackRowProps {
   row: Row<TrackSummary>;

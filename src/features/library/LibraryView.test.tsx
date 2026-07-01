@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrackDetails, TrackSummary } from "../../types/track";
+import type { ShortcutRule } from "../settings/settings";
 import { LibraryView } from "./LibraryView";
 
 const mocks = vi.hoisted(() => ({
@@ -31,8 +32,31 @@ const settingsMock = vi.hoisted(() => ({
   settings: {
     interfaceLanguage: "es",
     keyboardShortcutsEnabled: true,
+    customKeyboardShortcuts: [] as ShortcutRule[],
     library: {
       visibleLimit: 1000,
+      visibleColumns: [
+        "title",
+        "artist",
+        "album",
+        "rating",
+        "status",
+        "project",
+        "version",
+        "duration",
+        "path",
+      ],
+      columnOrder: [
+        "title",
+        "artist",
+        "album",
+        "rating",
+        "status",
+        "project",
+        "version",
+        "duration",
+        "path",
+      ],
       rememberFilters: false,
       rememberScanFolder: false,
       lastScanFolder: "",
@@ -169,6 +193,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   settingsMock.settings.interfaceLanguage = "es";
   settingsMock.settings.keyboardShortcutsEnabled = true;
+  settingsMock.settings.customKeyboardShortcuts = [];
   playerStateMock.currentTrack = null;
   playerStateMock.state.trackId = null;
   playerStateMock.state.status = "stopped";
@@ -358,10 +383,10 @@ describe("LibraryView keyboard shortcuts", () => {
     );
     fireEvent.click(view.getByRole("button", { name: "Abrir canción en Explorador" }));
 
-    expect(onOpenExplorerTrack).toHaveBeenCalledWith(1);
+    expect(onOpenExplorerTrack).toHaveBeenCalledWith(1, [1]);
   });
 
-  it("abre en Explorador la cancion que esta reproduciendo aunque haya otra seleccionada", async () => {
+  it("abre en Explorador la cancion seleccionada aunque haya otra reproduciendose", async () => {
     playerStateMock.state.trackId = 2;
     playerStateMock.state.status = "playing";
     const onOpenExplorerTrack = vi.fn();
@@ -371,14 +396,15 @@ describe("LibraryView keyboard shortcuts", () => {
     await waitFor(() => expect(mocks.getTrack).toHaveBeenCalledWith(1));
     fireEvent.click(view.getByRole("button", { name: "Abrir canción en Explorador" }));
 
-    expect(onOpenExplorerTrack).toHaveBeenCalledWith(2);
+    expect(onOpenExplorerTrack).toHaveBeenCalledWith(1, [1]);
   });
 
-  it("abre en Explorador la primera cancion lanzada aunque el estado aun no tenga trackId", async () => {
+  it("abre en Explorador la seleccion de la tabla en orden visible", async () => {
     playerStateMock.currentTrack = details(summary(2));
     const onOpenExplorerTrack = vi.fn();
     const view = render(<LibraryView onOpenExplorerTrack={onOpenExplorerTrack} />);
-    fireEvent.click(await view.findByText("Tema 1"));
+    await view.findByText("Tema 1");
+    fireEvent.click(view.getAllByRole("checkbox")[0]);
 
     await waitFor(() =>
       expect(
@@ -387,7 +413,7 @@ describe("LibraryView keyboard shortcuts", () => {
     );
     fireEvent.click(view.getByRole("button", { name: /Abrir.*Explorador/ }));
 
-    expect(onOpenExplorerTrack).toHaveBeenCalledWith(2);
+    expect(onOpenExplorerTrack).toHaveBeenCalledWith(1, [1, 2]);
   });
 
   it("carga detalles completos por id y muestra filename cuando no hay title tag", async () => {
@@ -709,6 +735,34 @@ describe("LibraryView keyboard shortcuts", () => {
 
     fireEvent.keyDown(window, { key: " " });
     expect(mocks.togglePlayback).toHaveBeenCalled();
+  });
+
+  it("aplica un atajo personalizado de mood a la seleccion", async () => {
+    settingsMock.settings.customKeyboardShortcuts = [
+      {
+        id: "custom-mood-danceable",
+        enabled: true,
+        context: "library",
+        field: "mood",
+        value: "Danceable",
+        key: "d",
+        ctrl: false,
+        alt: false,
+        shift: false,
+        meta: false,
+      },
+    ];
+    const view = render(<LibraryView />);
+    await view.findByText("Tema 1");
+    fireEvent.click(view.getAllByRole("checkbox")[0]);
+
+    fireEvent.keyDown(window, { key: "d" });
+
+    await waitFor(() =>
+      expect(mocks.updateTrackOrganization).toHaveBeenCalledWith([1, 2], {
+        mood: { value: "Danceable" },
+      }),
+    );
   });
 
   it("no dispara atajos al escribir en busqueda", async () => {

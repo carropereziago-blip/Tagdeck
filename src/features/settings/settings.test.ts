@@ -5,6 +5,7 @@ import {
   FIELD_VISIBILITY_CAPABILITIES,
   FIELD_VISIBILITY_FIELDS,
   SECTION_ONBOARDING_IDS,
+  defaultKeyboardShortcuts,
   isFieldRequiredInZone,
   isFieldSupportedInZone,
   isFieldVisible,
@@ -137,7 +138,37 @@ describe("normalizeSettings", () => {
     expect(settings.library.visibleColumns).toContain("title");
   });
 
-  it("aplica presets manteniendo los mínimos de navegación", () => {
+  it("normaliza y persiste el orden de columnas de Biblioteca", () => {
+    const settings = normalizeSettings({
+      library: {
+        columnOrder: ["rating", "title", "rating", "unknown"],
+      },
+    });
+
+    expect(settings.library.columnOrder[0]).toBe("rating");
+    expect(settings.library.columnOrder[1]).toBe("title");
+    expect(settings.library.columnOrder.filter((column) => column === "rating")).toHaveLength(1);
+    expect(visibleLibraryColumns(settings.fieldVisibility, settings.library.columnOrder)[0]).toBe("rating");
+  });
+
+  it("define atajos por defecto con valores internos reales", () => {
+    const shortcuts = defaultKeyboardShortcuts();
+
+    expect(shortcuts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "rating", value: "10", key: "0" }),
+        expect.objectContaining({ field: "status", value: "archived", key: "A" }),
+        expect.objectContaining({ field: "status", value: "editing", key: "P" }),
+        expect.objectContaining({ field: "status", value: "review", key: "U" }),
+        expect.objectContaining({ field: "action", value: "play_pause", key: "Space" }),
+        expect.objectContaining({ field: "action", value: "reset_zoom", key: "0", ctrl: true }),
+      ]),
+    );
+    expect(shortcuts.some((shortcut) => shortcut.value === "in_progress")).toBe(false);
+    expect(shortcuts.some((shortcut) => shortcut.value === "radio_ready")).toBe(false);
+  });
+
+  it("aplica presets manteniendo los minimos de navegacion", () => {
     const preset = applyFieldVisibilityPreset("minimal");
 
     expect(preset.libraryTable).toEqual(["title", "artist", "duration"]);

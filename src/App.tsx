@@ -40,7 +40,8 @@ function TagDeckApp() {
     criterion: ExplorerCriterion;
     token: number;
     focusTrackId?: number;
-  }>({ criterion: "unreviewed", token: 0 });
+    queueIds?: number[];
+  }>({ criterion: "all", token: 0 });
   const [navigationTarget, setNavigationTarget] = useState<{
     section: "library" | "organization";
     trackId: number;
@@ -48,6 +49,7 @@ function TagDeckApp() {
   const [sessionLaunch, setSessionLaunch] = useState<{
     trackId?: number;
     queueIds?: number[];
+    queueName?: string;
   }>({});
 
   function openTrack(section: "library" | "organization", trackId: number) {
@@ -55,8 +57,8 @@ function TagDeckApp() {
     navigate(section);
   }
 
-  function openSession(trackId: number, queueIds?: number[]) {
-    setSessionLaunch({ trackId, queueIds });
+  function openSession(trackId: number, queueIds?: number[], queueName?: string) {
+    setSessionLaunch({ trackId, queueIds, queueName });
     navigate("session");
   }
 
@@ -69,22 +71,24 @@ function TagDeckApp() {
     updateSettings((current) => ({ ...current, hasSeenOnboarding: true }));
   }
 
-  function startReviewing(criterion: ExplorerCriterion = "unreviewed") {
+  function startReviewing(criterion: ExplorerCriterion = "all") {
     markOnboardingSeen();
     setExplorerLaunch((current) => ({
       criterion,
       token: current.token + 1,
       focusTrackId: undefined,
+      queueIds: undefined,
     }));
     navigate("explorer");
   }
 
-  function openTrackInExplorer(trackId: number) {
+  function openTrackInExplorer(trackId: number, queueIds?: number[]) {
     markOnboardingSeen();
     setExplorerLaunch((current) => ({
       criterion: "all",
       token: current.token + 1,
       focusTrackId: trackId,
+      queueIds,
     }));
     navigate("explorer");
   }
@@ -128,7 +132,7 @@ function TagDeckApp() {
     if (section === "library") {
       setLibraryScanRequest((value) => value + 1);
     } else if (section === "explorer" || section === "dashboard") {
-      startReviewing("unreviewed");
+      startReviewing("all");
     }
   }
 
@@ -158,6 +162,7 @@ function TagDeckApp() {
             initialCriterion={explorerLaunch.criterion}
             launchToken={explorerLaunch.token}
             focusTrackId={explorerLaunch.focusTrackId}
+            initialQueueIds={explorerLaunch.queueIds}
           />
         ) : activeSection === "playlists" ? (
           <PlaylistsView onOpenTrack={openTrack} onOpenSession={openSession} />
@@ -165,6 +170,7 @@ function TagDeckApp() {
           <SessionView
             initialTrackId={sessionLaunch.trackId}
             initialQueueIds={sessionLaunch.queueIds}
+            initialQueueName={sessionLaunch.queueName}
             onOpenTrack={openTrack}
           />
         ) : activeSection === "dashboard" ? (
@@ -172,7 +178,7 @@ function TagDeckApp() {
         ) : activeSection === "settings" ? (
           <SettingsView onOpenOnboarding={() => updateSettings((current) => ({ ...current, hasSeenOnboarding: false }))} onOpenDemo={openDemo} />
         ) : activeSection === "demo" ? (
-          <DemoView onNavigate={navigate} onStartReviewing={() => startReviewing("unreviewed")} />
+          <DemoView onNavigate={navigate} onStartReviewing={() => startReviewing("all")} />
         ) : (
           <OrganizationView
             onOpenSession={openSession}
@@ -187,7 +193,7 @@ function TagDeckApp() {
       {loaded && !settings.hasSeenOnboarding && (
         <OnboardingDialog
           onClose={markOnboardingSeen}
-          onStartReviewing={() => startReviewing("unreviewed")}
+          onStartReviewing={() => startReviewing("all")}
           onScanFolder={scanFromOnboarding}
           onOpenDemo={openDemo}
         />

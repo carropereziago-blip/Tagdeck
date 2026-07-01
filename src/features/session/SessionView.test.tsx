@@ -6,9 +6,11 @@ import {
   fireEvent,
   render,
   act,
+  screen,
   waitFor,
   within,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrackDetails, TrackSummary } from "../../types/track";
 import { SessionView } from "./SessionView";
@@ -211,6 +213,54 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("SessionView", () => {
+  it("termina la preparacion inicial tambien con StrictMode", async () => {
+    const view = render(
+      <StrictMode>
+        <SessionView initialTrackId={1} onOpenTrack={vi.fn()} />
+      </StrictMode>,
+    );
+
+    expect(
+      await view.findByRole("heading", { name: "Sugerencias afines" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(view.queryByText("Preparando sesión...")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("muestra UI vacia si no hay canciones sin quedarse preparando", async () => {
+    mocks.getLibraryTracks.mockResolvedValue({ items: [], total: 0 });
+
+    const view = render(<SessionView onOpenTrack={vi.fn()} />);
+
+    expect(await view.findByText("No hay canciones disponibles")).toBeInTheDocument();
+    expect(view.queryByText("Preparando sesión...")).not.toBeInTheDocument();
+  });
+
+  it("muestra error de preparacion y permite reintentar", async () => {
+    const recovered = [summary(1), summary(2)];
+    mocks.getLibraryTracks
+      .mockRejectedValueOnce(new Error("fallo de prueba"))
+      .mockResolvedValueOnce({ items: recovered, total: recovered.length });
+    mocks.getTrack.mockImplementation(async (id: number) =>
+      details(recovered.find((item) => item.id === id) ?? summary(id)),
+    );
+
+    const view = render(<SessionView initialTrackId={1} onOpenTrack={vi.fn()} />);
+
+    expect(
+      await view.findByText(/No se pudo preparar la sesión/),
+    ).toBeInTheDocument();
+    expect(view.queryByText("Preparando sesión...")).not.toBeInTheDocument();
+
+    fireEvent.click(view.getByRole("button", { name: "Reintentar" }));
+
+    expect(
+      await view.findByRole("heading", { name: "Sugerencias afines" }),
+    ).toBeInTheDocument();
+    expect(mocks.getLibraryTracks).toHaveBeenCalledTimes(2);
+  });
+
   it("muestra carpeta y criterio en el header sin workflow activo ni filtro duplicado", async () => {
     const view = render(<SessionView initialTrackId={1} onOpenTrack={vi.fn()} />);
 
@@ -368,10 +418,12 @@ describe("SessionView", () => {
       <SessionView
         initialTrackId={3}
         initialQueueIds={[3, 1, 2]}
+        initialQueueName="Library selection · 3 songs"
         onOpenTrack={vi.fn()}
       />,
     );
 
+    expect(await screen.findByText(/Library selection/)).toBeInTheDocument();
     await waitFor(() => expect(mocks.playTrack).toHaveBeenCalled());
     expect(mocks.playTrack.mock.calls[0][0].id).toBe(3);
     await waitFor(() =>
@@ -516,6 +568,57 @@ describe("SessionView", () => {
         expect.objectContaining({ id: 3 }),
         "session_queue_previous",
       ),
+    );
+  });
+
+  it("mantiene la cola y la lista activa al reproducir una cancion manual desde busqueda", async () => {
+    mocks.getPlaylists.mockResolvedValue([
+      {
+        id: 7,
+        name: "Orden manual",
+        description: null,
+        playlistType: "manual",
+        songCount: 3,
+        totalDurationMs: 540_000,
+        createdAt: "2026-06-14",
+        updatedAt: "2026-06-14",
+      },
+    ]);
+    const view = render(<SessionView initialTrackId={1} onOpenTrack={vi.fn()} />);
+    await view.findByRole("heading", { name: /Tema 1/ });
+
+    fireEvent.click(await view.findByRole("button", { name: "Cargar lista" }));
+    await waitFor(() => expect(mocks.getPlaylist).toHaveBeenCalledWith(7));
+    expect(await view.findByText("Lista activa: Orden manual")).toBeInTheDocument();
+
+    fireEvent.change(view.getByLabelText("Buscar canciones"), {
+      target: { value: "manual target" },
+    });
+    const result = await view.findByRole("article", { name: "Manual Target" });
+
+    mocks.playTrack.mockClear();
+    fireEvent.click(
+      within(result).getByRole("button", { name: "Reproducir ahora" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.playTrack).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 5 }),
+        "user_click",
+      ),
+    );
+    expect(view.getByText("Lista activa: Orden manual")).toBeInTheDocument();
+
+    fireEvent.click(
+      await view.findByRole("button", { name: "Guardar cola como lista" }),
+    );
+    fireEvent.change(view.getByLabelText("Nombre de lista"), {
+      target: { value: "Cola conservada" },
+    });
+    fireEvent.click(view.getByRole("button", { name: "Guardar sesión" }));
+
+    await waitFor(() =>
+      expect(mocks.addTracksToPlaylist).toHaveBeenCalledWith(90, [5, 1, 2]),
     );
   });
 

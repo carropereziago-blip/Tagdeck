@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  findShortcutForEvent,
+  shortcutConflictIds,
   shortcutRatingFromKey,
   shortcutStatusFromKey,
   shouldIgnoreKeyboardShortcut,
@@ -48,4 +50,42 @@ describe("keyboardShortcuts", () => {
     expect(shortcutStatusFromKey("D")).toBe("generating");
     expect(shortcutStatusFromKey("u")).toBe("review");
   });
+
+  it("detecta conflictos solo dentro del mismo contexto", () => {
+    const conflicts = shortcutConflictIds([
+      shortcut("one", "explorer", "d"),
+      shortcut("two", "explorer", "D"),
+      shortcut("three", "library", "d"),
+    ]);
+
+    expect(conflicts.has("one")).toBe(true);
+    expect(conflicts.has("two")).toBe(true);
+    expect(conflicts.has("three")).toBe(false);
+  });
+
+  it("encuentra atajos globales o del contexto activo", () => {
+    const event = new KeyboardEvent("keydown", { key: "d", bubbles: true });
+    const rules = [
+      shortcut("library", "library", "d"),
+      shortcut("global", "global", "d"),
+    ];
+
+    expect(findShortcutForEvent(rules, "explorer", event)?.id).toBe("global");
+    expect(findShortcutForEvent(rules, "library", event)?.id).toBe("library");
+  });
 });
+
+function shortcut(id: string, context: "global" | "library" | "explorer" | "session", key: string) {
+  return {
+    id,
+    enabled: true,
+    context,
+    field: "mood" as const,
+    value: "Danceable",
+    key,
+    ctrl: false,
+    alt: false,
+    shift: false,
+    meta: false,
+  };
+}

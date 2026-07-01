@@ -23,6 +23,7 @@ import { formatDuration } from "../../lib/format";
 import {
   shortcutRatingFromKey,
   shortcutStatusFromKey,
+  findShortcutForEvent,
   shouldIgnoreKeyboardShortcut,
 } from "../../lib/keyboardShortcuts";
 import {
@@ -45,7 +46,7 @@ import type {
 import { usePlayer, type PlayReason } from "../player/PlayerContext";
 import { AddToPlaylistDialog } from "../playlists/AddToPlaylistDialog";
 import { useSettings } from "../settings/SettingsContext";
-import { visibleFieldsForZone, type FieldVisibilityField } from "../settings/settings";
+import { visibleFieldsForZone, type FieldVisibilityField, type ShortcutRule } from "../settings/settings";
 import {
   WORKFLOW_PRESET_STORAGE_KEY,
   WORKFLOW_PRESET_IDS,
@@ -64,19 +65,19 @@ type CompactOption = {
   label: string;
 };
 
-const CRITERIA: ExplorerCriterion[] = [
+const CRITERIA: ExplorerCriterion[] = dedupeValues([
+  "all",
   "unreviewed",
   "unrated",
-  "no_project",
-  "untagged",
-  "needs_action",
   "daw_rescue",
   "radio_ready",
   "release_ready",
   "archived",
+  "no_project",
+  "untagged",
+  "needs_action",
   "random",
-  "all",
-];
+]);
 
 const STRONG_PARTS = SYSTEM_OPTIONS.strongPart;
 const MAIN_PROBLEMS = SYSTEM_OPTIONS.mainProblem;
@@ -204,17 +205,22 @@ export function ExplorerView({
   initialCriterion,
   launchToken,
   focusTrackId,
+  initialQueueIds,
 }: {
   onNavigate: (section: MainSection) => void;
   onOpenSession?: (trackId: number, queueIds?: number[]) => void;
   initialCriterion?: ExplorerCriterion;
   launchToken?: number;
   focusTrackId?: number;
+  initialQueueIds?: number[];
 }) {
   const { settings, updateSettings } = useSettings();
   const { t } = useI18n();
   const [criterion, setCriterion] = useState<ExplorerCriterion>(
     initialCriterion ?? settings.explorer.defaultCriterion,
+  );
+  const [activeLibrarySelectionIds, setActiveLibrarySelectionIds] = useState<number[] | null>(
+    initialQueueIds?.length ? initialQueueIds : null,
   );
   const [workflowPresetId, setWorkflowPresetId] = useState<WorkflowPresetId>(() => {
     const stored = window.localStorage.getItem(WORKFLOW_PRESET_STORAGE_KEY);
@@ -253,11 +259,13 @@ export function ExplorerView({
     criterion: ExplorerCriterion;
     folderPath: string;
     workflowSmartCollection: string | null;
+    customQueueKey: string;
   }>({
     initialized: false,
     criterion,
     folderPath,
     workflowSmartCollection,
+    customQueueKey: activeLibrarySelectionIds?.join(",") ?? "",
   });
   const lastSelection = useRef<{
     trackId: number;
@@ -267,7 +275,8 @@ export function ExplorerView({
 
   useEffect(() => {
     if (initialCriterion) setCriterion(initialCriterion);
-  }, [initialCriterion, launchToken]);
+    setActiveLibrarySelectionIds(initialQueueIds?.length ? initialQueueIds : null);
+  }, [initialCriterion, initialQueueIds, launchToken]);
 
   const commitTrackSelection = useCallback(
     (
@@ -316,6 +325,30 @@ export function ExplorerView({
       setLoading(true);
       setError(null);
       try {
+        if (activeLibrarySelectionIds?.length) {
+          const organizationOptions = await api.getOrganizationOptions();
+          const details = await Promise.all(
+            activeLibrarySelectionIds.map((id) => api.getTrack(id)),
+          );
+          const summaries = details.map(trackToSummary);
+          const focusId = focusTrackId ?? activeLibrarySelectionIds[0];
+          const focusedIndex = Math.max(
+            0,
+            summaries.findIndex((item) => item.id === focusId),
+          );
+          const focusedDetails = details[focusedIndex];
+          const focusedSummary = summaries[focusedIndex];
+          const remaining = summaries.filter((item) => item.id !== focusedSummary.id);
+          setTotal(summaries.length);
+          setOptions(organizationOptions);
+          setLibraryTracks([focusedSummary, ...remaining], "explorer", {
+            next: () => explorerControls.current.next(),
+            previous: () => explorerControls.current.previous(),
+          });
+          setQueue(remaining);
+          commitTrackSelection(focusedDetails, "explorer_focus_track", true);
+          return focusedDetails;
+        }
         const [page, organizationOptions] = await Promise.all([
           api.getExplorerTracks({
             criterion,
@@ -381,6 +414,7 @@ export function ExplorerView({
     [
       criterion,
       folderPath,
+      activeLibrarySelectionIds,
       focusTrackId,
       commitTrackSelection,
       loadTrack,
@@ -394,8 +428,11 @@ export function ExplorerView({
 
   useEffect(() => {
     const previous = previousLoadParams.current;
+    const customQueueKey = activeLibrarySelectionIds?.join(",") ?? "";
     const reason: ExplorerSelectionReason = !previous.initialized
       ? "explorer_init"
+      : previous.customQueueKey !== customQueueKey
+        ? "explorer_focus_track"
       : previous.folderPath !== folderPath
         ? "explorer_folder_changed"
         : previous.criterion !== criterion ||
@@ -408,10 +445,11 @@ export function ExplorerView({
       criterion,
       folderPath,
       workflowSmartCollection,
+      customQueueKey,
     };
     setHistory([]);
     void loadQueue(reason, userAction);
-  }, [criterion, folderPath, loadQueue, workflowSmartCollection]);
+  }, [activeLibrarySelectionIds, criterion, folderPath, loadQueue, workflowSmartCollection]);
 
   useEffect(() => {
     void api
@@ -560,6 +598,9 @@ export function ExplorerView({
             {t("explorer.curatorMode")} · {total}{" "}
             {total === 1 ? t("explorer.pendingSong") : t("explorer.pendingSongs")}
             {folderPath ? ` ${t("explorer.inThisFolder")}` : ""}
+            {activeLibrarySelectionIds?.length
+              ? ` · ${t("explorer.selectedFromLibrary")} (${activeLibrarySelectionIds.length})`
+              : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -582,13 +623,21 @@ export function ExplorerView({
           <label className="text-xs text-white/40">
             {t("explorer.criterion")}
             <select
-              value={criterion}
+              value={activeLibrarySelectionIds?.length ? "library_selection" : criterion}
               onChange={(event) => {
-                setCriterion(event.target.value as ExplorerCriterion);
+                const value = event.target.value;
+                if (value === "library_selection") return;
+                setActiveLibrarySelectionIds(null);
+                setCriterion(value as ExplorerCriterion);
                 setWorkflowSmartCollection(null);
               }}
               className="ml-2 rounded-md border border-white/10 bg-[#202226] px-3 py-2 text-sm text-white/75"
             >
+              {activeLibrarySelectionIds?.length ? (
+                <option value="library_selection">
+                  {t("explorer.selectedFromLibrary")}
+                </option>
+              ) : null}
               {CRITERIA.map((item) => (
                 <option key={item} value={item}>
                   {criterionLabel(item, t)}
@@ -653,6 +702,7 @@ export function ExplorerView({
             confirmArchive={settings.explorer.confirmArchive}
             simpleMode={settings.interfaceMode === "simple"}
             shortcutsEnabled={settings.keyboardShortcutsEnabled}
+            customShortcuts={settings.customKeyboardShortcuts ?? []}
             rightPanelZoom={settings.layout.explorerRightPanelZoom}
             onRightPanelZoomChange={changeExplorerPanelZoom}
           />
@@ -696,6 +746,7 @@ function ExplorerWorkspace({
   confirmArchive,
   simpleMode,
   shortcutsEnabled,
+  customShortcuts,
   rightPanelZoom,
   onRightPanelZoomChange,
 }: {
@@ -721,6 +772,7 @@ function ExplorerWorkspace({
   confirmArchive: boolean;
   simpleMode: boolean;
   shortcutsEnabled: boolean;
+  customShortcuts: ShortcutRule[];
   rightPanelZoom: number;
   onRightPanelZoomChange: (action: PanelZoomAction) => void;
 }) {
@@ -901,6 +953,85 @@ function ExplorerWorkspace({
     setFileMetadata((current) => ({ ...current, [field]: value }));
   }
 
+  function addListValue(source: string, value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return source;
+    const current = splitValues(source);
+    if (
+      current.some(
+        (item) => normalizeSelectionValue(item) === normalizeSelectionValue(trimmed),
+      )
+    ) {
+      return source;
+    }
+    return [...current, trimmed].join(", ");
+  }
+
+  function applyCustomShortcut(rule: ShortcutRule) {
+    const value = rule.value.trim();
+    if (rule.field === "rating") {
+      const nextRating = value === "clear" ? "" : String(Math.min(10, Math.max(1, Number(value))));
+      if (nextRating === "NaN") return false;
+      setRating(nextRating);
+      setLocalNotice(t("explorer.ratingApplied").replace("{rating}", nextRating));
+      return true;
+    }
+    if (rule.field === "status" && value) {
+      return changeStatus(value as SongStatus);
+    }
+    if (rule.field === "genre" && value) {
+      setMetadataField("genre", normalizeGenre(value) ?? value);
+      setLocalNotice(`${t("field.genre")}: ${value}`);
+      return true;
+    }
+    if (rule.field === "mood" && value) {
+      setMood((current) => addListValue(current, value));
+      setLocalNotice(`${t("field.mood")}: ${value}`);
+      return true;
+    }
+    if (rule.field === "internal_tag" && value) {
+      addQuickTag(value);
+      setLocalNotice(`Tags: ${value}`);
+      return true;
+    }
+    if (rule.field === "model") {
+      setGenerationModel(value);
+      setLocalNotice(`${t("field.generationModel")}: ${value || "—"}`);
+      return true;
+    }
+    if (rule.field === "language") {
+      setLocalNotice(`${t("field.language")}: ${value || "—"}`);
+      return true;
+    }
+    if (rule.field === "next_action") {
+      setNextAction(value);
+      setLocalNotice(`${t("field.nextAction")}: ${value || "—"}`);
+      return true;
+    }
+    if (rule.field === "project") {
+      const project = projects.find(
+        (item) =>
+          String(item.id) === value ||
+          normalizeSelectionValue(item.name) === normalizeSelectionValue(value),
+      );
+      setProjectId(project ? String(project.id) : "");
+      setLocalNotice(`${t("field.project")}: ${project?.name ?? "—"}`);
+      return true;
+    }
+    if (rule.field === "action") {
+      if (value === "save") void submit(false);
+      else if (value === "save_next" || value === "save_and_next") void submit(true);
+      else if (value === "skip") onSkip();
+      else if (value === "next") onNext();
+      else if (value === "previous") onPrevious();
+      else if (value === "play_pause") void togglePlayback();
+      else if (value === "reset_zoom") onRightPanelZoomChange("reset");
+      else return false;
+      return true;
+    }
+    return false;
+  }
+
   async function submit(advanceAfterSave: boolean) {
     setSavingAction(advanceAfterSave ? "saveNext" : "save");
     setError(null);
@@ -960,6 +1091,11 @@ function ExplorerWorkspace({
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         onPrevious();
+        return;
+      }
+      const customShortcut = findShortcutForEvent(customShortcuts, "explorer", event);
+      if (customShortcut && applyCustomShortcut(customShortcut)) {
+        event.preventDefault();
         return;
       }
       const ratingShortcut = shortcutRatingFromKey(event.key);
@@ -2051,10 +2187,19 @@ function criterionLabel(value: ExplorerCriterion, t: (key: string) => string) {
     radio_ready: "Radio Ready",
     release_ready: "Release Ready",
     archived: t("field.archived"),
-    random: t("common.all"),
+    random: t("session.random"),
     all: t("common.all"),
   };
   return labels[value];
+}
+
+function dedupeValues<T extends string>(values: T[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
 }
 
 function trackToSummary(track: TrackDetails): TrackSummary {

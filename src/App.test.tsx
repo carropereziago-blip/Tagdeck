@@ -17,7 +17,7 @@ vi.mock("./features/library/LibraryView", () => ({
   LibraryView: ({
     onOpenExplorerTrack,
   }: {
-    onOpenExplorerTrack?: (trackId: number) => void;
+    onOpenExplorerTrack?: (trackId: number, queueIds?: number[]) => void;
   }) => (
     <div data-testid="library-view">
       Library main
