@@ -1,25 +1,27 @@
 {
   "app": "Soundbender TagDeck",
   "manifest_version": 1,
-  "channel": "beta",
-  "latest_version": "1.4.0-beta.1",
-  "released_at": "2026-06-26T12:00:00Z",
+  "channel": "stable",
+  "latest_version": "1.4.0",
+  "released_at": "2026-07-01T15:59:44Z",
   "minimum_supported_version": "1.4.0-beta.1",
   "download_url": "https://soundbender.live/tagdeck/download",
-  "release_notes_url": "https://soundbender.live/tagdeck/releases/1.4.0-beta.1",
+  "release_notes_url": "https://soundbender.live/tagdeck/releases/1.4.0",
   "mandatory": false,
-  "sha256": null,
-  "size": null,
+  "sha256": "4DC067D0EDE75BD45C0769A5E8D230209356D384BBDC735EC5FCD94EF3CAAC11",
+  "size": 5559878,
   "notes": {
     "en": [
-      "Manual update checks from Settings.",
-      "Improved library backup and restore.",
-      "Workflow and library reliability improvements."
+      "Public launch build.",
+      "Customizable keyboard shortcuts with guided value/action selectors.",
+      "Reorderable Library columns and ordered Library selection handoff into Explorer/Session.",
+      "Includes the latest Session, Explorer and update hotfixes."
     ],
     "es": [
-      "Comprobacion manual de actualizaciones desde Ajustes.",
-      "Mejoras en backup y restauracion de biblioteca.",
-      "Mejoras de fiabilidad en workflow y biblioteca."
+      "Build de lanzamiento publico.",
+      "Atajos de teclado personalizables con selectores guiados de valor/accion.",
+      "Columnas de Biblioteca reordenables y envio ordenado de seleccion a Explorer/Sesion.",
+      "Incluye los ultimos hotfixes de Sesion, Explorer y actualizador."
     ]
   }
 }

@@ -1,6 +1,6 @@
 # Download Soundbender TagDeck
 
-Latest version: 1.4.0-beta.1
+Latest version: 1.4.0
 
 - Download for Windows
 - Release notes
@@ -9,7 +9,7 @@ Latest version: 1.4.0-beta.1
 
 # Descargar Soundbender TagDeck
 
-Ultima version: 1.4.0-beta.1
+Ultima version: 1.4.0
 
 - Descargar para Windows
 - Notas de version

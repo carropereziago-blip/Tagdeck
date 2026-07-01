@@ -1,7 +1,7 @@
 # Download Soundbender TagDeck
 
-Latest version: 1.4.0-beta.1  
-Release: Beta 1
+Latest version: 1.4.0  
+Release: Public launch build
 
 Soundbender TagDeck is a local-first curation workstation for AI music creators.
 
@@ -14,13 +14,12 @@ Soundbender TagDeck is a local-first curation workstation for AI music creators.
 
 Installer:
 
-SHA256: 1854E7B17103847DF400EFB3240ACB044F9DA9F1D16F70003654961A58406D8F  
-Size: 5562489 bytes
+SHA256: 4DC067D0EDE75BD45C0769A5E8D230209356D384BBDC735EC5FCD94EF3CAAC11  
+Size: 5559878 bytes
 
 Source ZIP:
 
-SHA256: 8DC3472070127F6420063D3D190B53AB0D2B3C32FB989E22EA10D89E1A7AEC26  
-Size: 694036 bytes
+See `CHECKSUMS.txt` in the release folder.
 
 ## Source Code
 
