@@ -3732,7 +3732,7 @@ dependencies = [
 
 [[package]]
 name = "soundbender-tagdeck"
-version = "1.4.0-beta.1"
+version = "1.4.0"
 dependencies = [
  "chrono",
  "dunce",

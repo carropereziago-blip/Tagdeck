@@ -2,9 +2,28 @@
 
 All notable public changes to Soundbender TagDeck will be documented here.
 
-This project is preparing its first public source release. Version numbers may
-still differ between internal tester builds and future GitHub releases until the
-first tagged public release is created.
+This project is preparing its first public source release.
+
+## 1.4.0 - Public launch build
+
+- Added customizable keyboard shortcuts with editable contexts for Library,
+  Explorer and Session.
+- Added guided shortcut value controls: closed dropdowns for Rating, Status,
+  Action and Language; autocomplete/custom values for Genre, Mood, internal
+  tags, Project and Model.
+- Improved Library workflow with configurable/reorderable columns.
+- Added Library selection handoff into Explorer and Session as ordered temporary
+  queues.
+- Kept safe local-first behavior: creative fields remain in SQLite/TagDeck
+  unless an existing safe metadata-write flow is explicitly used.
+- Refreshed Windows installer, update manifest and manual GitHub/source package.
+
+## 1.4.0-beta.2 - Beta 2 hotfix
+
+- Fixed Session Mode getting stuck on Preparing session.
+- Fixed Session playlist loading so the queue remains intact after the first song starts.
+- Fixed Explorer Criterion showing duplicate All entries.
+- Refreshed installer, update manifest and manual GitHub/source package.
 
 ## 1.4.0-beta.1 - Beta 1
 

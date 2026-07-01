@@ -176,6 +176,7 @@ pub struct TrackSummary {
     pub main_problem: Option<String>,
     pub intended_use: Option<String>,
     pub mood: Option<String>,
+    pub language: Option<String>,
     pub generation_model: Option<String>,
     pub reviewed_at: Option<String>,
     pub last_reviewed_at: Option<String>,
@@ -224,6 +225,7 @@ pub struct TrackDetails {
     pub main_problem: Option<String>,
     pub intended_use: Option<String>,
     pub mood: Option<String>,
+    pub language: Option<String>,
     pub generation_model: Option<String>,
     pub reviewed_at: Option<String>,
     pub last_reviewed_at: Option<String>,
@@ -605,12 +607,22 @@ pub struct OrganizationOptions {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrganizationPatch {
+    pub rating: Option<MetadataFieldUpdate<i64>>,
     pub status: Option<MetadataFieldUpdate<String>>,
     pub workflow_notes: Option<MetadataFieldUpdate<String>>,
+    pub workflow_notes_mode: Option<String>,
     pub next_action: Option<MetadataFieldUpdate<String>>,
+    pub next_action_mode: Option<String>,
     pub version_label: Option<MetadataFieldUpdate<String>>,
     pub project_id: Option<MetadataFieldUpdate<i64>>,
+    pub mood: Option<MetadataFieldUpdate<String>>,
+    pub strong_part: Option<MetadataFieldUpdate<String>>,
+    pub main_problem: Option<MetadataFieldUpdate<String>>,
+    pub intended_use: Option<MetadataFieldUpdate<String>>,
+    pub language: Option<MetadataFieldUpdate<String>>,
+    pub generation_model: Option<MetadataFieldUpdate<String>>,
     pub tag_names: Option<Vec<String>>,
+    pub tag_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

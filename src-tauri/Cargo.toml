@@ -1,6 +1,6 @@
 [package]
 name = "soundbender-tagdeck"
-version = "1.4.0-beta.1"
+version = "1.4.0"
 description = "Biblioteca musical local y editor seguro de metadatos"
 authors = ["Soundbender"]
 edition = "2021"

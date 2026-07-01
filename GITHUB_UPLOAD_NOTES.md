@@ -1,41 +1,17 @@
-﻿# GitHub Upload Notes
+﻿# Soundbender TagDeck 1.4.0 - GitHub upload notes
 
-This folder contains the source files prepared for a public Soundbender TagDeck GitHub repository.
+This folder contains the source package prepared for manual GitHub upload.
 
-## Upload these contents to the repository root
+Do not upload generated folders such as node_modules, dist, release, github_upload, or src-tauri/target.
 
-Upload the files and folders inside this directory, not the parent directory itself.
+Suggested GitHub steps:
+1. Create or open the TagDeck repository.
+2. Upload the contents of this folder to the repository root.
+3. In the repository release page, attach the installer from release/Soundbender_TagDeck_1.4.0_Release.
+4. Publish docs/web/tagdeck/latest.json to the website updater endpoint if needed.
 
-## Included
-
-- React / TypeScript frontend in src/
-- Tauri / Rust backend in src-tauri/
-- SQLite migrations
-- Tests
-- Documentation in docs/
-- GitHub issue templates and CI workflow in .github/
-- GPL-3.0 LICENSE
-- README, CHANGELOG, CONTRIBUTING and SECURITY docs
-- package.json / package-lock.json / Cargo.toml / Cargo.lock
-
-## Intentionally excluded
-
-- node_modules/
-- dist/
-- src-tauri/target/
-- release/
-- installers and generated bundles
-- SQLite databases
-- logs and backups
-- audio/music files
-- .git/ local history
-- .agents/ and .codex/ local workspace data
-- IMPLEMENTATION_LOG.md because it contains local implementation trace data
-
-## After uploading
-
-1. Create the GitHub repo.
-2. Upload all files from this folder to the repo root.
-3. Confirm GitHub Actions sees .github/workflows/ci.yml.
-4. Add repository description and topics.
-5. Optionally create a release entry later and attach the installer/source ZIP from the release folder.
+Build locally:
+- npm.cmd install
+- npm.cmd run test
+- npm.cmd run build
+- npm.cmd run tauri:build

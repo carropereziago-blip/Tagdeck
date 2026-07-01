@@ -45,6 +45,7 @@ struct ImportCandidate {
     main_problem: Option<String>,
     intended_use: Option<String>,
     mood: Option<String>,
+    language: Option<String>,
     generation_model: Option<String>,
     genre: Option<String>,
 }
@@ -317,7 +318,7 @@ impl Database {
                        WHERE song_tags.track_id = tracks.id
                    ), '') AS tag_names,
                    tracks.mood,
-                   NULL AS language,
+                   tracks.language,
                    tracks.generation_model AS model,
                    tracks.strong_part,
                    tracks.main_problem,
@@ -788,7 +789,7 @@ impl Database {
         validate_rating_filter(query.rating_max)?;
         validate_status(query.status.as_deref())?;
 
-        let limit = query.limit.clamp(1, 5_000);
+        let limit = query.limit.clamp(1, 20_000);
         let offset = query.offset.max(0);
         let search = query
             .search
@@ -829,7 +830,7 @@ impl Database {
                     WHERE song_tags.track_id = tracks.id
                 ), '') AS tag_names,
                 workflow_notes, next_action,
-                strong_part, main_problem, intended_use, mood, generation_model,
+                strong_part, main_problem, intended_use, mood, language, generation_model,
                 reviewed_at, last_reviewed_at, skip_count,
                 metadata_read_error
             FROM tracks
@@ -915,7 +916,7 @@ impl Database {
                     JOIN internal_tags ON internal_tags.id = song_tags.tag_id
                     WHERE song_tags.track_id = tracks.id
                 ), '') AS tag_names,
-                strong_part, main_problem, intended_use, mood, generation_model,
+                strong_part, main_problem, intended_use, mood, language, generation_model,
                 reviewed_at, last_reviewed_at, skip_count,
                 metadata_read_error
             FROM tracks
@@ -994,7 +995,7 @@ impl Database {
                     WHERE song_tags.track_id = tracks.id
                 ), '') AS tag_names,
                 workflow_notes, next_action,
-                strong_part, main_problem, intended_use, mood, generation_model,
+                strong_part, main_problem, intended_use, mood, language, generation_model,
                 reviewed_at, last_reviewed_at, skip_count,
                 metadata_read_error
             FROM tracks
@@ -1177,6 +1178,7 @@ impl Database {
                 &candidate.intended_use
             );
             push_text!("mood", &record.mood, &candidate.mood);
+            push_text!("language", &record.language, &candidate.language);
             push_text!(
                 "generation_model",
                 &record.model,
@@ -1333,7 +1335,7 @@ impl Database {
                    ), '') AS tag_names,
                    tracks.workflow_notes, tracks.next_action, tracks.strong_part,
                    tracks.main_problem, tracks.intended_use, tracks.mood,
-                   tracks.generation_model, tracks.genre
+                   tracks.language, tracks.generation_model, tracks.genre
             FROM tracks
             LEFT JOIN projects ON projects.id = tracks.project_id
             WHERE tracks.missing_file = 0
@@ -2054,8 +2056,25 @@ impl Database {
         track_ids: &[i64],
         patch: &OrganizationPatch,
     ) -> AppResult<OrganizationEditSummary> {
+        if let Some(rating) = &patch.rating {
+            validate_rating_filter(rating.value)?;
+        }
         if let Some(status) = &patch.status {
             validate_status(status.value.as_deref())?;
+        }
+        let tag_mode = patch.tag_mode.as_deref().unwrap_or("replace");
+        if !matches!(tag_mode, "add" | "remove" | "replace") {
+            return Err(AppError::InvalidMetadata("Unsupported tag mode".into()));
+        }
+        let notes_mode = patch.workflow_notes_mode.as_deref().unwrap_or("replace");
+        if !matches!(notes_mode, "replace" | "append") {
+            return Err(AppError::InvalidMetadata("Unsupported notes mode".into()));
+        }
+        let next_action_mode = patch.next_action_mode.as_deref().unwrap_or("replace");
+        if !matches!(next_action_mode, "replace" | "append") {
+            return Err(AppError::InvalidMetadata(
+                "Unsupported next action mode".into(),
+            ));
         }
         let now = Utc::now().to_rfc3339();
         let device_id = self.get_or_create_device().await?;
@@ -2063,23 +2082,55 @@ impl Database {
         let mut updated = 0;
 
         for track_id in track_ids {
+            let current_texts = if notes_mode == "append" || next_action_mode == "append" {
+                Some(
+                    sqlx::query_as::<_, (Option<String>, Option<String>)>(
+                        "SELECT workflow_notes, next_action FROM tracks WHERE id = ?",
+                    )
+                    .bind(*track_id)
+                    .fetch_optional(&mut *transaction)
+                    .await?
+                    .ok_or(AppError::TrackNotFound(*track_id))?,
+                )
+            } else {
+                None
+            };
             let mut builder = QueryBuilder::<Sqlite>::new("UPDATE tracks SET updated_at = ");
             builder.push_bind(&now);
             builder.push(", updated_by_device = ").push_bind(&device_id);
+            if let Some(field) = &patch.rating {
+                builder.push(", rating = ").push_bind(field.value);
+            }
             if let Some(field) = &patch.status {
                 builder
                     .push(", status = ")
                     .push_bind(field.value.as_deref().unwrap_or("review"));
             }
             if let Some(field) = &patch.workflow_notes {
-                builder
-                    .push(", workflow_notes = ")
-                    .push_bind(clean_optional_text(field.value.as_deref()));
+                let value = if notes_mode == "append" {
+                    append_optional_text(
+                        current_texts
+                            .as_ref()
+                            .and_then(|(notes, _)| notes.as_deref()),
+                        field.value.as_deref(),
+                    )
+                } else {
+                    clean_optional_text(field.value.as_deref())
+                };
+                builder.push(", workflow_notes = ").push_bind(value);
             }
             if let Some(field) = &patch.next_action {
-                builder
-                    .push(", next_action = ")
-                    .push_bind(clean_optional_text(field.value.as_deref()));
+                let value = if next_action_mode == "append" {
+                    append_optional_text(
+                        current_texts
+                            .as_ref()
+                            .and_then(|(_, next_action)| next_action.as_deref()),
+                        field.value.as_deref(),
+                    )
+                } else {
+                    clean_optional_text(field.value.as_deref())
+                };
+                builder.push(", next_action = ").push_bind(value);
             }
             if let Some(field) = &patch.version_label {
                 builder
@@ -2089,6 +2140,36 @@ impl Database {
             if let Some(field) = &patch.project_id {
                 builder.push(", project_id = ").push_bind(field.value);
             }
+            if let Some(field) = &patch.mood {
+                builder
+                    .push(", mood = ")
+                    .push_bind(clean_optional_text(field.value.as_deref()));
+            }
+            if let Some(field) = &patch.strong_part {
+                builder
+                    .push(", strong_part = ")
+                    .push_bind(clean_optional_text(field.value.as_deref()));
+            }
+            if let Some(field) = &patch.main_problem {
+                builder
+                    .push(", main_problem = ")
+                    .push_bind(clean_optional_text(field.value.as_deref()));
+            }
+            if let Some(field) = &patch.intended_use {
+                builder
+                    .push(", intended_use = ")
+                    .push_bind(clean_optional_text(field.value.as_deref()));
+            }
+            if let Some(field) = &patch.language {
+                builder
+                    .push(", language = ")
+                    .push_bind(clean_optional_text(field.value.as_deref()));
+            }
+            if let Some(field) = &patch.generation_model {
+                builder
+                    .push(", generation_model = ")
+                    .push_bind(clean_optional_text(field.value.as_deref()));
+            }
             builder.push(" WHERE id = ").push_bind(*track_id);
             updated += builder
                 .build()
@@ -2097,11 +2178,30 @@ impl Database {
                 .rows_affected();
 
             if let Some(tag_names) = &patch.tag_names {
-                sqlx::query("DELETE FROM song_tags WHERE track_id = ?")
-                    .bind(*track_id)
-                    .execute(&mut *transaction)
-                    .await?;
-                for tag_name in normalized_tag_names(tag_names) {
+                let normalized_tags = normalized_tag_names(tag_names);
+                if tag_mode == "replace" {
+                    sqlx::query("DELETE FROM song_tags WHERE track_id = ?")
+                        .bind(*track_id)
+                        .execute(&mut *transaction)
+                        .await?;
+                } else if tag_mode == "remove" {
+                    for tag_name in normalized_tags {
+                        let normalized = tag_name.to_lowercase();
+                        sqlx::query(
+                            "DELETE FROM song_tags
+                             WHERE track_id = ?
+                             AND tag_id IN (
+                                 SELECT id FROM internal_tags WHERE normalized_name = ?
+                             )",
+                        )
+                        .bind(*track_id)
+                        .bind(&normalized)
+                        .execute(&mut *transaction)
+                        .await?;
+                    }
+                    continue;
+                }
+                for tag_name in normalized_tags {
                     let normalized = tag_name.to_lowercase();
                     sqlx::query(
                         "INSERT INTO internal_tags (name, normalized_name, created_at)
@@ -2228,6 +2328,7 @@ impl Database {
         push_text!("main_problem", track.main_problem, current.main_problem);
         push_text!("intended_use", track.intended_use, current.intended_use);
         push_text!("mood", track.mood, current.mood);
+        push_text!("language", track.language, current.language);
         push_text!("generation_model", track.model, current.generation_model);
         push_text!("reviewed_at", track.reviewed_at, current.reviewed_at);
         push_text!(
@@ -2966,6 +3067,14 @@ fn clean_optional_text(value: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
+fn append_optional_text(current: Option<&str>, addition: Option<&str>) -> Option<String> {
+    let addition = clean_optional_text(addition)?;
+    match clean_optional_text(current) {
+        Some(current) => Some(format!("{current}\n{addition}")),
+        None => Some(addition),
+    }
+}
+
 fn normalized_tag_names(tag_names: &[String]) -> Vec<String> {
     let mut names = tag_names
         .iter()
@@ -3123,6 +3232,8 @@ fn push_library_search_filter(builder: &mut QueryBuilder<'_, Sqlite>, search: &s
             .push(" OR genre LIKE ")
             .push_bind(pattern.clone())
             .push(" OR mood LIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR language LIKE ")
             .push_bind(pattern.clone())
             .push(" OR status LIKE ")
             .push_bind(pattern.clone())
@@ -3701,9 +3812,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn library_allows_five_thousand_visible_tracks() {
+    async fn library_allows_twenty_thousand_visible_tracks() {
         let database = Database::connect_in_memory().await.unwrap();
-        let tracks = (0..2_050)
+        let tracks = (0..5_050)
             .map(|index| sample_track(&format!("limit-{index:04}")))
             .collect::<Vec<_>>();
         database.upsert_scanned_tracks(&tracks).await.unwrap();
@@ -3721,14 +3832,99 @@ mod tests {
                 smart_collection: None,
                 sort_by: "title".to_owned(),
                 sort_direction: "asc".to_owned(),
-                limit: 5_000,
+                limit: 20_000,
                 offset: 0,
             })
             .await
             .unwrap();
 
-        assert_eq!(page.total, 2_050);
-        assert_eq!(page.items.len(), 2_050);
+        assert_eq!(page.total, 5_050);
+        assert_eq!(page.items.len(), 5_050);
+    }
+
+    #[tokio::test]
+    async fn organization_patch_updates_internal_fields_without_file_writes() {
+        let database = Database::connect_in_memory().await.unwrap();
+        database
+            .upsert_scanned_tracks(&[sample_track("creative-fields")])
+            .await
+            .unwrap();
+
+        database
+            .update_track_organization(
+                &[1],
+                &OrganizationPatch {
+                    rating: Some(MetadataFieldUpdate { value: Some(9) }),
+                    status: Some(MetadataFieldUpdate {
+                        value: Some("idea".to_owned()),
+                    }),
+                    workflow_notes: Some(MetadataFieldUpdate {
+                        value: Some("Primera nota".to_owned()),
+                    }),
+                    next_action: Some(MetadataFieldUpdate {
+                        value: Some("Revisar hook".to_owned()),
+                    }),
+                    version_label: Some(MetadataFieldUpdate {
+                        value: Some("v1".to_owned()),
+                    }),
+                    mood: Some(MetadataFieldUpdate {
+                        value: Some("Cósmico".to_owned()),
+                    }),
+                    strong_part: Some(MetadataFieldUpdate {
+                        value: Some("Drop final".to_owned()),
+                    }),
+                    main_problem: Some(MetadataFieldUpdate {
+                        value: Some("Voz baja".to_owned()),
+                    }),
+                    intended_use: Some(MetadataFieldUpdate {
+                        value: Some("Radio".to_owned()),
+                    }),
+                    language: Some(MetadataFieldUpdate {
+                        value: Some("ES".to_owned()),
+                    }),
+                    generation_model: Some(MetadataFieldUpdate {
+                        value: Some("Suno v4.5".to_owned()),
+                    }),
+                    tag_names: Some(vec!["IA".to_owned(), "Demo".to_owned()]),
+                    tag_mode: Some("replace".to_owned()),
+                    ..OrganizationPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+        database
+            .update_track_organization(
+                &[1],
+                &OrganizationPatch {
+                    workflow_notes: Some(MetadataFieldUpdate {
+                        value: Some("Segunda nota".to_owned()),
+                    }),
+                    workflow_notes_mode: Some("append".to_owned()),
+                    tag_names: Some(vec!["Demo".to_owned()]),
+                    tag_mode: Some("remove".to_owned()),
+                    ..OrganizationPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let details = database.get_track(1).await.unwrap();
+        assert_eq!(details.rating, Some(9));
+        assert_eq!(details.status, "idea");
+        assert_eq!(
+            details.workflow_notes.as_deref(),
+            Some("Primera nota\nSegunda nota")
+        );
+        assert_eq!(details.next_action.as_deref(), Some("Revisar hook"));
+        assert_eq!(details.version_label.as_deref(), Some("v1"));
+        assert_eq!(details.mood.as_deref(), Some("Cósmico"));
+        assert_eq!(details.strong_part.as_deref(), Some("Drop final"));
+        assert_eq!(details.main_problem.as_deref(), Some("Voz baja"));
+        assert_eq!(details.intended_use.as_deref(), Some("Radio"));
+        assert_eq!(details.language.as_deref(), Some("ES"));
+        assert_eq!(details.generation_model.as_deref(), Some("Suno v4.5"));
+        assert_eq!(details.tag_names, "IA");
+        assert_eq!(database.edit_history_count().await.unwrap(), 0);
     }
 
     #[tokio::test]
@@ -3769,6 +3965,7 @@ mod tests {
                         value: Some(project.id),
                     }),
                     tag_names: Some(vec!["Core Seed".to_owned(), "Needs Mix".to_owned()]),
+                    ..OrganizationPatch::default()
                 },
             )
             .await
@@ -4040,6 +4237,7 @@ mod tests {
                         value: Some(project.id),
                     }),
                     tag_names: Some(vec!["Suno".to_owned(), "Cinematic".to_owned()]),
+                    ..OrganizationPatch::default()
                 },
             )
             .await
@@ -4121,6 +4319,7 @@ mod tests {
                         value: Some(project.id),
                     }),
                     tag_names: Some(vec!["Suno".to_owned()]),
+                    ..OrganizationPatch::default()
                 },
             )
             .await

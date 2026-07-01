@@ -577,6 +577,7 @@ fn export_csv(tracks: &[TrackSummary], options: &ExportOptions) -> String {
             "main_problem",
             "intended_use",
             "mood",
+            "language",
             "model",
             "reviewed_at",
             "last_reviewed_at",
@@ -625,6 +626,7 @@ fn export_csv(tracks: &[TrackSummary], options: &ExportOptions) -> String {
                 track.main_problem.clone().unwrap_or_default(),
                 track.intended_use.clone().unwrap_or_default(),
                 track.mood.clone().unwrap_or_default(),
+                track.language.clone().unwrap_or_default(),
                 track.generation_model.clone().unwrap_or_default(),
                 track.reviewed_at.clone().unwrap_or_default(),
                 track.last_reviewed_at.clone().unwrap_or_default(),
@@ -692,6 +694,7 @@ fn export_json(tracks: &[TrackSummary], options: &ExportOptions) -> Result<Strin
                 row.insert("main_problem".to_owned(), track.main_problem.clone().into());
                 row.insert("intended_use".to_owned(), track.intended_use.clone().into());
                 row.insert("mood".to_owned(), track.mood.clone().into());
+                row.insert("language".to_owned(), track.language.clone().into());
                 row.insert("model".to_owned(), track.generation_model.clone().into());
                 row.insert("reviewed_at".to_owned(), track.reviewed_at.clone().into());
                 row.insert(
@@ -1823,6 +1826,7 @@ mod tests {
             main_problem: Some("Mezcla sucia".to_owned()),
             intended_use: Some("Radio".to_owned()),
             mood: Some("Cósmico".to_owned()),
+            language: Some("ES".to_owned()),
             generation_model: Some("Suno v4.5".to_owned()),
             skip_count: 2,
             ..TrackSummary::default()
@@ -1832,10 +1836,10 @@ mod tests {
 
         assert!(csv.contains("stable_id"));
         assert!(csv.contains("relative_path"));
-        assert!(csv.contains("strong_part,main_problem,intended_use,mood,model"));
+        assert!(csv.contains("strong_part,main_problem,intended_use,mood,language,model"));
         assert!(csv.contains("\"stable-track-1\""));
         assert!(csv.contains("\"Suno/tema.mp3\""));
-        assert!(csv.contains("\"Voz\",\"Mezcla sucia\",\"Radio\",\"Cósmico\",\"Suno v4.5\""));
+        assert!(csv.contains("\"Voz\",\"Mezcla sucia\",\"Radio\",\"Cósmico\",\"ES\",\"Suno v4.5\""));
         assert!(csv.contains("\"2\""));
     }
 

@@ -1,4 +1,4 @@
-SOUNDBENDER TAGDECK 1.3.0-beta.3
+SOUNDBENDER TAGDECK 1.4.0
 GUIA PARA TESTER
 
 Soundbender TagDeck es una aplicacion local para Windows destinada a organizar,
@@ -7,7 +7,7 @@ generada con IA/Suno.
 
 IMPORTANTE
 
-Esta es una version beta sin firma digital. Windows SmartScreen puede mostrar
+Esta es una version sin firma digital. Windows SmartScreen puede mostrar
 una advertencia de editor desconocido. Empieza con una carpeta copiada de
 20-50 canciones, no con tu biblioteca principal.
 
@@ -58,5 +58,5 @@ DATOS Y SEGURIDAD
 COMO REPORTAR UN ERROR
 
 Incluye los pasos exactos, resultado esperado, resultado real, version de
-Windows y version de TagDeck (1.3.0-beta.3). No envies canciones, rutas
+Windows y version de TagDeck (1.4.0). No envies canciones, rutas
 personales, bases de datos o logs privados sin revisarlos previamente.
