@@ -1,1 +1,1 @@
-export const UPDATE_MANIFEST_URL = "https://soundbender.live/tagdeck/latest.json";
+export const UPDATE_MANIFEST_URL = "https://soundbender.live/tagdeck/latest.txt";

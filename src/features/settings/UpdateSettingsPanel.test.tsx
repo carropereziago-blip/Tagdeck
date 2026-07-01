@@ -89,7 +89,7 @@ function updateResult(
   updateAvailable: boolean,
 ): UpdateCheckResult {
   return {
-    manifestUrl: "https://soundbender.live/tagdeck/latest.json",
+    manifestUrl: "https://soundbender.live/tagdeck/latest.txt",
     currentVersion,
     latestVersion,
     updateAvailable,
