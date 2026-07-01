@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::Duration;
 use url::Url;
 
-pub const UPDATE_MANIFEST_URL: &str = "https://soundbender.live/tagdeck/latest.json";
+pub const UPDATE_MANIFEST_URL: &str = "https://soundbender.live/tagdeck/latest.txt";
 const APP_NAME: &str = "Soundbender TagDeck";
 const SUPPORTED_MANIFEST_VERSION: i64 = 1;
 const TRUSTED_HOST: &str = "soundbender.live";
