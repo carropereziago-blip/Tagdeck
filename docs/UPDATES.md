@@ -16,7 +16,7 @@ The user flow is:
 Production builds check:
 
 ```text
-https://soundbender.live/tagdeck/latest.json
+https://soundbender.live/tagdeck/latest.txt
 ```
 
 The app performs a public GET only. It does not send library data, file paths,
@@ -98,12 +98,12 @@ Version comparison follows semver, including prereleases:
 4. Add release notes under:
    - `https://soundbender.live/tagdeck/releases/<version>`
 5. Update:
-   - `https://soundbender.live/tagdeck/latest.json`
+   - `https://soundbender.live/tagdeck/latest.txt`
 
-Recommended web headers for `latest.json`:
+Recommended web headers for `latest.txt`:
 
 ```text
-Content-Type: application/json
+Content-Type: text/plain; charset=utf-8
 Cache-Control: no-cache
 ```
 
